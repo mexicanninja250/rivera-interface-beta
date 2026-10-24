@@ -1,0 +1,469 @@
+// The Home tab: Glasshouse Home, a home screen of Glasshouse's own in place of LG's.
+
+let homeStatus = null;
+let homeCat = null;      // what the TV's Home lists: apps, devices, picked channels, order
+let homeLayout = null;
+let homeChannels = null; // the TV's whole channel list, for picking
+let homeArmed = null;    // the control waiting for its second press: 'on', 'off' or 'hide'
+let homeArmTimer = null;
+let homeSaving = false;
+let homeLoadRevision = 0;
+let homeWallTimer = null;
+let homeWallUploading = false;
+// null until the server says; false on a TV Glasshouse Home is not offered on.
+let homeAvailable = null;
+
+const HOME_ROWS = {
+  app: () => t('home.row.apps', 'Apps'),
+  dev: () => t('home.row.inputs', 'Inputs'),
+  ch: () => t('home.row.channels', 'Channels')
+};
+
+async function homeGet(path) {
+  const r = await (await fetch(api(path))).json();
+  if (!r || r.ok === false) throw new Error((r && r.error) || t('common.unknownError', 'unknown error'));
+  return r;
+}
+
+async function homePost(path, body) {
+  const res = await fetch(api(path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  const r = await res.json();
+  if (!r || !r.ok) throw new Error((r && r.error) || t('common.unknownError', 'unknown error'));
+  return r;
+}
+
+// The tab, as Game's, only where the server offers Glasshouse Home.
+function setHomeAvailable(st) {
+  homeAvailable = st.available !== false;
+  if (q('tab-btn-home')) q('tab-btn-home').hidden = !homeAvailable;
+  document.querySelectorAll('[data-glasshouse-home-note]').forEach(note => { note.hidden = !st.enabled; });
+}
+
+async function loadHomeAvailable() {
+  try { setHomeAvailable(await homeGet('/api/home')); } catch (e) {}
+}
+
+async function loadHome(afterSave) {
+  if (homeSaving && afterSave !== true) return;
+  const revision = ++homeLoadRevision;
+  try {
+    const [st, cat] = await Promise.all([homeGet('/api/home'), homeGet('/api/home/catalogue')]);
+    if (revision !== homeLoadRevision) return;
+    homeStatus = st;
+    homeCat = cat;
+    homeLayout = st.layout;
+  } catch (e) { showErr(e.message); return; }
+  setHomeAvailable(homeStatus);
+  if (!homeAvailable && activeTab === 'home') return showTab('control');
+  renderHome();
+}
+
+function homeWritable() { return !!(!homeSaving && homeStatus && (homeStatus.supported.ok || homeStatus.enabled || homeStatus.restorePending) && homeStatus.writable !== false); }
+
+function renderHome() {
+  const st = homeStatus;
+  const state = q('home-state');
+  const desc = q('home-state-desc');
+  const btn = q('home-switch');
+  if (!st || !state) return;
+  if (st.restorePending) {
+    state.textContent = t('home.restorePending', 'LG Home restoration is incomplete');
+    desc.textContent = t('home.restoreRetry', 'Retry restoring LG Home before switching Glasshouse Home on again.');
+  } else if (!st.supported.ok) {
+    state.textContent = t('home.unavailable', 'Not available on this TV');
+    desc.textContent = st.supported.reason || '';
+  } else if (st.enabled) {
+    state.textContent = t('home.isOn', 'Glasshouse Home is the TV’s Home');
+    desc.textContent = st.lgHomeOpen
+      ? t('home.isOnLgOpen', 'LG’s Home is open for now. Glasshouse Home comes back when something else is opened, or Home is pressed.')
+      : st.active
+        ? t('home.isOnDesc', 'It opens in LG’s Home’s place: with the Home and Back buttons, and when the TV wakes on Home.')
+        : t('home.isOnPending', 'Switched on, but LG’s Home is still in its place. Switching off and on again tries once more.');
+  } else {
+    state.textContent = t('home.isOff', 'LG’s Home is the TV’s Home');
+    desc.textContent = t('home.isOffDesc', 'Nothing of LG’s is changed: Glasshouse Home is laid over LG’s Home while on, and switching off takes it away.');
+  }
+  const more = q('home-more');
+  if (more) more.hidden = !st.supported.ok;
+  const hideRow = q('home-hide-lg-row');
+  // webOS 9 only: newer TVs have no layout file for LG's Home to start on.
+  if (hideRow) hideRow.hidden = !st.supported.ok || st.hideLgHomeAtStartAvailable === false;
+  const picRow = q('home-picture-row');
+  if (picRow) picRow.hidden = !st.supported.ok;
+  const pic = q('home-picture');
+  if (pic) {
+    const on = !!st.layout && st.layout.picture === true;
+    updateToggle(pic, { cls: on ? 'good' : 'idle', label: on ? t('common.on', 'On') : t('common.off', 'Off') });
+    pic.disabled = !homeWritable();
+  }
+  const hide = q('home-hide-lg');
+  if (hide) {
+    const armed = homeArmed === 'hide';
+    updateToggle(hide, {
+      cls: armed ? 'warn' : st.hideLgHomeAtStart ? 'good' : 'idle',
+      label: armed ? t('home.hideLgConfirm', 'Press again to hide it') : st.hideLgHomeAtStart ? t('common.on', 'On') : t('common.off', 'Off')
+    });
+    hide.disabled = !homeWritable();
+  }
+  if (btn) {
+    const wantOn = !(st.enabled || st.restorePending);
+    const armed = homeArmed === (wantOn ? 'on' : 'off');
+    btn.disabled = !homeWritable();
+    btn.className = 'pill ' + (armed ? 'warn' : st.enabled ? 'good' : 'idle');
+    btn.textContent = armed
+      ? (wantOn ? t('home.confirmOn', 'Press again to switch on') : t('home.confirmOff', 'Press again to use LG Home'))
+      : (st.restorePending ? t('home.retryRestore', 'Retry restoring LG Home') : wantOn ? t('home.switchOn', 'Use Glasshouse Home') : t('home.switchOff', 'Use LG Home'));
+  }
+  const hist = q('home-history-note');
+  if (hist) hist.hidden = st.history;
+  renderHomeRows();
+  renderHomeChannels();
+  renderHomeWalls();
+  renderHomeColours();
+  q('home-reset').disabled = !homeWritable();
+}
+
+const HOME_LOOK_NAMES = () => ({
+  warm: t('home.colours.warm', 'Warm'),
+  glasshouse: t('home.colours.glasshouse', 'Glasshouse'),
+  white: t('home.colours.white', 'White'),
+  ice: t('home.colours.ice', 'Ice'),
+  rose: t('home.colours.rose', 'Rose'),
+  lilac: t('home.colours.lilac', 'Lilac')
+});
+
+// The preset matching the chosen colours, the first (the view's own) when none are chosen, or null for custom ones.
+function homeLookNow() {
+  const presets = (homeStatus && homeStatus.colourPresets) || [];
+  const c = homeLayout && homeLayout.colours;
+  if (!c) return presets[0] || null;
+  return presets.find(p => p.text === c.text && p.accent === c.accent) || null;
+}
+
+// Each preset as a small Glasshouse Home: the clock in its text, a row's name in the quieter shade, the accent's mark.
+function renderHomeColours() {
+  const box = q('home-looks');
+  if (!box || !homeStatus) return;
+  const presets = homeStatus.colourPresets || [];
+  const names = HOME_LOOK_NAMES();
+  const now = homeLookNow();
+  const can = homeWritable() && !homeSaving;
+  // The first preset is the view's own colours, saved as none chosen.
+  box.innerHTML = presets.map((p, i) => `<button type="button" class="home-look${now && now.id === p.id ? ' picked' : ''}"
+      onclick="homeSaveLayout({ colours: ${i === 0 ? 'null' : `{ text: '${p.text}', accent: '${p.accent}' }`} })" ${can ? '' : 'disabled'}
+      aria-pressed="${now && now.id === p.id}" style="--look-text:${p.text};--look-accent:${p.accent}">
+      <span class="home-look-screen"><span class="home-look-clock">21:40</span><span class="home-look-row">${esc(t('home.row.apps', 'Apps'))}</span><i></i></span>
+      <span class="home-look-name">${esc(names[p.id] || p.id)}</span>
+    </button>`).join('');
+  const c = (homeLayout && homeLayout.colours) || presets[0] || { text: '#ece7df', accent: '#e9ad55' };
+  const text = q('home-col-text'), accent = q('home-col-accent');
+  if (text && document.activeElement !== text) text.value = c.text;
+  if (accent && document.activeElement !== accent) accent.value = c.accent;
+  [text, accent].forEach(el => { if (el) el.disabled = !can; });
+  const reset = q('home-col-reset');
+  if (reset) reset.disabled = !can || !(homeLayout && homeLayout.colours);
+}
+
+function homeCustomColours() {
+  homeSaveLayout({ colours: { text: q('home-col-text').value, accent: q('home-col-accent').value } });
+}
+
+function homeItem(kind, id) {
+  if (kind === 'app' && id === 'lg-home') return { title: t('home.lgHome', 'LG Home'), lg: true };
+  const list = kind === 'app' ? homeCat.apps : kind === 'dev' ? homeCat.devices : homeCat.channels;
+  const it = list.find(x => x.id === id);
+  if (!it) return null;
+  if (kind === 'dev' && it.unused) return { title: it.name, sub: t('home.dev.unused', 'Nothing connected') };
+  if (kind === 'dev') return { title: it.name, sub: it.via ? t('home.dev.through', 'HDMI {port}, through {via}', { port: it.port, via: it.via }) : t('home.dev.port', 'HDMI {port}', { port: it.port }) };
+  if (kind === 'ch') return { title: it.number + ' ' + it.name };
+  return { title: it.title, icon: it.icon };
+}
+
+function renderHomeRows() {
+  const box = q('home-rows');
+  if (!box || !homeCat) return;
+  const usable = homeWritable();
+  // Redrawing after each change keeps the rows that were open, and what was typed in the channel search.
+  const open = box.children.length ? [...box.querySelectorAll('details[open]')].map(d => d.dataset.kind) : [homeLayout.rows[0]];
+  const filter = q('home-ch-filter') ? q('home-ch-filter').value : '';
+  box.innerHTML = homeLayout.rows.map((kind, ri) => {
+    const order = homeCat.order[kind] || [];
+    // A Last opened row is in the order the server sends; moving a tile means choosing Your order first.
+    const recent = homeSort(kind) === 'recent';
+    const movable = usable && !recent;
+    const tiles = order.map((id, i) => {
+      const it = homeItem(kind, id);
+      if (!it) return '';
+      const hidden = kind !== 'ch' && homeLayout.hidden[kind].includes(id);
+      const icon = it.icon ? `<img class="rk-ico" src="${esc(api(it.icon))}" alt="">` : '';
+      return `<div class="prot-row home-tile${hidden ? ' home-hidden' : ''}">
+        <div class="prot-main"><div class="prot-title">${icon}<span translate="no">${esc(it.title)}</span></div>
+          ${it.sub ? `<div class="prot-desc">${esc(it.sub)}</div>` : ''}</div>
+        <div class="prot-status">
+          <button type="button" class="pill idle home-move" ${movable && i > 0 ? '' : 'disabled'} onclick="homeMoveTile('${kind}', ${i}, -1)" aria-label="${esc(t('home.earlier', 'Earlier'))}">↑</button>
+          <button type="button" class="pill idle home-move" ${movable && i < order.length - 1 ? '' : 'disabled'} onclick="homeMoveTile('${kind}', ${i}, 1)" aria-label="${esc(t('home.later', 'Later'))}">↓</button>
+          ${it.lg ? `<span class="pill idle">${esc(t('home.alwaysShown', 'Always shown'))}</span>` :
+            kind === 'ch' ? `<button type="button" class="pill idle" ${usable ? '' : 'disabled'} onclick="homeToggleChannel('${jsq(id)}')">${esc(t('home.ch.remove', 'Remove'))}</button>` :
+            renderToggle({ cls: hidden ? 'idle' : 'good', label: hidden ? t('home.hidden', 'Hidden') : t('home.shown', 'Shown'),
+              disabled: !usable, onclick: `homeToggleTile('${kind}', '${jsq(id)}')` })}
+        </div></div>`;
+    }).join('');
+    return `<details class="home-row" data-kind="${kind}"${open.includes(kind) ? ' open' : ''}>
+      <summary><span class="prot-title">${esc(HOME_ROWS[kind]())}</span>
+        <span class="home-row-move">
+          <button type="button" class="pill idle" ${usable && ri > 0 ? '' : 'disabled'} onclick="event.preventDefault(); homeMoveRow(${ri}, -1)">${esc(t('home.rowUp', 'Row up'))}</button>
+          <button type="button" class="pill idle" ${usable && ri < homeLayout.rows.length - 1 ? '' : 'disabled'} onclick="event.preventDefault(); homeMoveRow(${ri}, 1)">${esc(t('home.rowDown', 'Row down'))}</button>
+        </span></summary>
+      <div class="prot-table">${homeSortRow(kind, usable)}${tiles || `<div class="sub">${esc(kind === 'ch' ? t('home.ch.empty', 'No channels yet. Add them below.') : t('home.rowEmpty', 'Nothing to show in this row yet.'))}</div>`}</div>
+      ${kind === 'ch' ? homeChannelPicker() : ''}
+    </details>`;
+  }).join('');
+  if (q('home-ch-filter')) q('home-ch-filter').value = filter;
+}
+
+function homeSort(kind) { return homeLayout.sort && homeLayout.sort[kind] === 'recent' ? 'recent' : 'custom'; }
+
+function homeSortRow(kind, usable) {
+  const sort = homeSort(kind);
+  return `<div class="prot-row">
+    <div class="prot-main"><div class="prot-title"><label for="home-sort-${kind}">${esc(t('home.sort', 'Order'))}</label></div>
+      <div class="prot-desc">${esc(sort === 'recent'
+        ? t('home.sortRecentDesc', 'The tile opened last comes first, whether it was opened from Glasshouse Home or not. Tiles not yet opened follow in this row’s own order.')
+        : t('home.sortCustomDesc', 'As arranged here, or by holding OK on Glasshouse Home.'))}</div></div>
+    <div class="prot-status"><select id="home-sort-${kind}" class="pill-sel" ${usable ? '' : 'disabled'} onchange="homeSetSort('${kind}', this.value)">
+      <option value="custom"${sort === 'custom' ? ' selected' : ''}>${esc(t('home.sortCustom', 'Your order'))}</option>
+      <option value="recent"${sort === 'recent' ? ' selected' : ''}>${esc(t('home.sortRecent', 'Last opened'))}</option>
+    </select></div></div>`;
+}
+
+function homeSetSort(kind, value) {
+  if (value === homeSort(kind)) return;
+  homeSaveLayout({ sort: { [kind]: value } });
+}
+
+async function homeSaveLayout(patch) {
+  if (!homeWritable()) return;
+  homeSaving = true;
+  homeLoadRevision++;
+  renderHome();
+  try {
+    const r = await homePost('/api/home/layout', patch);
+    homeLayout = r.layout;
+    homeStatus.layout = r.layout;
+  } catch (e) { showErr(e.message); }
+  await loadHome(true);
+  homeSaving = false;
+  renderHome();
+}
+
+function homeMoveTile(kind, i, d) {
+  if (!homeWritable()) return;
+  const order = homeCat.order[kind].slice();
+  const j = i + d;
+  if (j < 0 || j >= order.length) return;
+  [order[i], order[j]] = [order[j], order[i]];
+  // Only this row: the others keep following their own default order.
+  homeSaveLayout({ order: { [kind]: order } });
+}
+
+function homeMoveRow(i, d) {
+  const rows = homeLayout.rows.slice();
+  const j = i + d;
+  if (j < 0 || j >= rows.length) return;
+  [rows[i], rows[j]] = [rows[j], rows[i]];
+  homeSaveLayout({ rows });
+}
+
+function homeToggleTile(kind, id) {
+  const hidden = Object.assign({}, homeLayout.hidden);
+  const list = hidden[kind].slice();
+  const i = list.indexOf(id);
+  if (i >= 0) list.splice(i, 1); else list.push(id);
+  hidden[kind] = list;
+  homeSaveLayout({ hidden });
+}
+
+function homeResetLayout() { homeSaveLayout({ reset: true }); }
+
+// The master switch: one press arms it, a second within five seconds acts.
+async function homeSwitch() {
+  if (!homeWritable()) return;
+  const want = homeStatus.enabled || homeStatus.restorePending ? 'off' : 'on';
+  if (homeArmed !== want) {
+    homeArmed = want;
+    clearTimeout(homeArmTimer);
+    homeArmTimer = setTimeout(() => { homeArmed = null; renderHome(); }, 5000);
+    return renderHome();
+  }
+  homeArmed = null;
+  clearTimeout(homeArmTimer);
+  const btn = q('home-switch');
+  if (btn) { btn.disabled = true; btn.textContent = t('apps.service.updating', 'Updating…'); }
+  try {
+    await homePost(want === 'on' ? '/api/home/enable' : '/api/home/disable');
+  } catch (e) { showErr(e.message); }
+  loadHome();
+}
+
+// Hiding LG's Home is what can leave a TV without one, so switching it on takes a second press.
+async function homeHideLg() {
+  if (!homeWritable()) return;
+  const want = !homeStatus.hideLgHomeAtStart;
+  if (want && homeArmed !== 'hide') {
+    homeArmed = 'hide';
+    clearTimeout(homeArmTimer);
+    homeArmTimer = setTimeout(() => { homeArmed = null; renderHome(); }, 5000);
+    return renderHome();
+  }
+  homeArmed = null;
+  clearTimeout(homeArmTimer);
+  homeSaving = true;
+  renderHome();
+  try {
+    await homePost('/api/home/start-layout', { hideLgHomeAtStart: want });
+  } catch (e) { showErr(e.message); }
+  homeSaving = false;
+  loadHome();
+}
+
+function homePicture() {
+  homeSaveLayout({ picture: homeLayout.picture !== true });
+}
+
+// Added channels are the Channels row; this finds more to add. Built once, then only its list redraws.
+function homeChannelPicker() {
+  return `<div class="home-ch-add">
+    <div class="prot-title">${esc(t('home.ch.addTitle', 'Add channels'))}</div>
+    <input type="search" id="home-ch-filter" class="home-ch-filter" placeholder="${esc(t('home.ch.find', 'Find a channel'))}" oninput="renderHomeChannels()">
+    <div class="prot-table home-ch-list" id="home-ch-list"></div>
+  </div>`;
+}
+
+async function homeLoadChannels() {
+  const box = q('home-ch-list');
+  if (box) box.innerHTML = `<div class="sub">${esc(t('home.ch.loading', 'Reading the TV’s channels…'))}</div>`;
+  try {
+    const r = await homeGet('/api/home/channels');
+    homeChannels = r.channels;
+  } catch (e) { showErr(e.message); homeChannels = null; }
+  renderHomeChannels();
+}
+
+function renderHomeChannels() {
+  const box = q('home-ch-list');
+  const filterBox = q('home-ch-filter');
+  if (!box || !homeLayout) return;
+  const picked = homeLayout.channels;
+  if (filterBox) filterBox.hidden = !homeChannels || !homeChannels.length;
+  if (!homeChannels) {
+    box.innerHTML = `<button type="button" class="pill idle" onclick="homeLoadChannels()">${esc(t('home.ch.show', 'Show the TV’s channels'))}</button>`;
+    return;
+  }
+  if (!homeChannels.length) {
+    box.innerHTML = `<div class="sub">${esc(t('home.ch.none', 'This TV has no channels tuned, so the Channels row stays empty.'))}</div>`;
+    return;
+  }
+  const filter = (filterBox && filterBox.value || '').toLowerCase();
+  const usable = homeWritable();
+  const rows = homeChannels
+    .filter(c => !picked.includes(c.id))
+    .filter(c => !filter || (c.number + ' ' + c.name).toLowerCase().includes(filter))
+    .map(c => `<div class="prot-row"><div class="prot-main"><div class="prot-title"><span class="num">${esc(c.number)}</span> ${esc(c.name)}</div>
+        ${c.radio ? `<div class="prot-desc">${esc(t('home.ch.radio', 'Radio'))}</div>` : ''}</div>
+        <div class="prot-status"><button type="button" class="pill idle" ${usable ? '' : 'disabled'} onclick="homeToggleChannel('${jsq(c.id)}')">${esc(t('home.ch.add', 'Add'))}</button></div></div>`);
+  box.innerHTML = rows.join('') || `<div class="sub">${esc(filter ? t('home.ch.noMatch', 'No channel matches that.') : t('home.ch.allAdded', 'Every channel is on Home.'))}</div>`;
+}
+
+function homeToggleChannel(id) {
+  const list = homeLayout.channels.slice();
+  const i = list.indexOf(id);
+  if (i >= 0) list.splice(i, 1); else list.push(id);
+  homeSaveLayout({ channels: list });
+}
+
+// The four wallpapers, by the hours each is shown.
+function renderHomeWalls() {
+  const box = q('home-walls');
+  if (!box) return;
+  const walls = homeStatus.wallpapers || {};
+  const busy = !homeWritable() || homeWallUploading || walls.uploading;
+  q('home-wall-slot').disabled = busy;
+  q('home-wall-file').disabled = busy;
+  q('home-wall-upload').disabled = busy || !q('home-wall-file').files.length;
+  q('home-wall-upload').textContent = homeWallUploading || walls.uploading ? t('home.wall.uploading', 'Uploading…') : t('home.wall.upload', 'Upload image');
+  q('home-wall-clear').disabled = busy || !walls.available;
+  clearTimeout(homeWallTimer);
+  if (walls.uploading) homeWallTimer = setTimeout(() => { if (activeTab === 'home') loadHome(); }, 2000);
+  if (!walls.available) { box.innerHTML = ''; delete box.dataset.revision; return; }
+  if (box.dataset.revision === walls.revision) return;
+  box.dataset.revision = walls.revision;
+  const slots = [
+    ['morning', t('home.wall.morning', 'Morning, 06:00 to 11:00')],
+    ['afternoon', t('home.wall.afternoon', 'Afternoon, 11:00 to 17:00')],
+    ['evening', t('home.wall.evening', 'Evening, 17:00 to 21:00')],
+    ['night', t('home.wall.night', 'Night, 21:00 to 06:00')]
+  ];
+  box.innerHTML = slots.map(([key, label]) => `<figure class="home-wall">
+    ${walls.slots && !walls.slots[key] ? `<div class="home-wall-empty">${esc(t('home.wall.black', 'Black'))}</div>`
+      : `<img src="${esc(api('/api/home/wallpaper?slot=' + key + '&v=' + encodeURIComponent(walls.revision || '')))}" alt="" loading="lazy">`}
+    <figcaption class="sub">${esc(label)}</figcaption></figure>`).join('');
+}
+
+async function homeUploadWall() {
+  const file = q('home-wall-file').files[0];
+  if (!file || !homeWritable() || homeWallUploading) return;
+  const slot = q('home-wall-slot').value;
+  const note = q('home-wall-upload-note');
+  homeWallUploading = true;
+  note.textContent = '';
+  renderHomeWalls();
+  let url;
+  try {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 25 * 1024 * 1024) {
+      throw new Error(t('home.wall.chooseImage', 'Choose a JPEG, PNG or WebP image up to 25 MB.'));
+    }
+    url = URL.createObjectURL(file);
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error(t('home.wall.unreadable', 'The image could not be opened.')));
+      img.src = url;
+    });
+    // Glasshouse Home is drawn at 1920 x 1080; the server refuses anything larger.
+    const scale = Math.min(1, 1920 / img.naturalWidth, 1080 / img.naturalHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+    if (!blob || blob.size > 5 * 1024 * 1024) throw new Error(t('home.wall.tooLarge', 'The prepared image is too large. Choose a smaller image.'));
+    const res = await fetch(api('/api/home/wallpapers/upload?slot=' + slot), {
+      method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
+    });
+    const r = await res.json();
+    if (!res.ok || !r.ok) throw new Error(r.error || t('home.wall.uploadFailed', 'The image could not be uploaded.'));
+    q('home-wall-file').value = '';
+    note.textContent = t('home.wall.uploadDone', 'Image uploaded. Home updates within a few seconds.');
+  } catch (e) { note.textContent = e.message; }
+  finally {
+    if (url) URL.revokeObjectURL(url);
+    homeWallUploading = false;
+    await loadHome();
+    renderHomeWalls();
+  }
+}
+
+async function homeClearUploads() {
+  if (!homeWritable() || homeWallUploading) return;
+  q('home-wall-upload-note').textContent = '';
+  try { await homePost('/api/home/wallpapers', { removeUploads: true }); }
+  catch (e) { q('home-wall-upload-note').textContent = e.message; }
+  await loadHome();
+}

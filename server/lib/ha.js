@@ -1,0 +1,1668 @@
+/*
+ * Home Assistant discovery entities, catalogue, category grouping,
+ * and discovery filtering for Node 0.12+ (strict ES5).
+ */
+
+var msg = require('./say').msg;
+
+// Screen saver names come from the registry, so a new one reaches Home
+// Assistant without a second list to keep in step (Bokeh was missed once).
+var SS = require('./screensavers').SCREENSAVERS;
+var topics = require('./topics');
+var names = require('./names');
+var hexColor = require('./util').hexColor;
+var APP_ID_RE = require('./iconserver').APP_ID_RE;
+var SS_IDS = Object.keys(SS);
+function ssMap(byLabel) {
+  var m = {};
+  SS_IDS.forEach(function (k) { if (byLabel) m[SS[k].label] = k; else m[k] = SS[k].label; });
+  return m;
+}
+
+// Logo dimming's names both ways, for a select that shows names and sends ids.
+var logoDimmingIds = {};
+var logoDimmingNames = Object.keys(names.LOGO_DIMMING).map(function (id) {
+  logoDimmingIds[names.LOGO_DIMMING[id]] = id;
+  return names.LOGO_DIMMING[id];
+});
+
+function picModeNames(ids) {
+  var byId = {};
+  for (var i = 0; i < ids.length; i++) byId[ids[i]] = names.pictureMode(ids[i]).display;
+  return byId;
+}
+
+var HA_CATEGORIES = [
+  { id: 'controls', name: msg('srv.ha.cat.controls', 'Controls & Media'), desc: msg('srv.ha.cat.controls.desc', 'Power, volume, mute, playback buttons, apps, and input sources.') },
+  { id: 'oled', name: msg('srv.ha.cat.oled', 'OLED Care'), desc: msg('srv.ha.cat.oled.desc', 'Panel on-time, pixel refresher countdowns, and burn-in protections.') },
+  { id: 'video', name: msg('srv.ha.cat.video', 'Video & HDMI Signal'), desc: msg('srv.ha.cat.video.desc', 'Active picture mode, dynamic range, refresh rate, VRR, ALLM, and link mode.') },
+  { id: 'system', name: msg('srv.ha.cat.system', 'System & Telemetry'), desc: msg('srv.ha.cat.system.desc', 'CPU, RAM, swap, SoC temperature, network rates, and storage health.') },
+  { id: 'diagnostics', name: msg('srv.ha.cat.diagnostics', 'Diagnostics & Settings'), desc: msg('srv.ha.cat.diagnostics.desc', 'Remote battery, audio format, standby LED, sleep timer, and ad blocker.') }
+];
+
+var HA_ENTITIES = [
+  // Controls & Media
+  { id: 'display_panel', type: 'switch', name: 'Display Panel', cat: 'controls' },
+  { id: 'mute', type: 'switch', name: 'Mute', cat: 'controls' },
+  { id: 'volume', type: 'number', name: 'Volume', cat: 'controls' },
+  { id: 'input_source', type: 'select', name: 'Input Source', cat: 'controls' },
+  { id: 'piccap', type: 'switch', name: 'PicCap Capture', cat: 'controls' },
+  { id: 'screen_notification', type: 'text', name: 'Screen Notification', cat: 'controls' },
+  { id: 'picture_mode', type: 'select', name: 'Picture Mode (Select)', cat: 'controls' },
+  { id: 'energy_saving', type: 'select', name: 'Energy Saving Step', cat: 'controls' },
+  { id: 'sound_output', type: 'select', name: 'Sound Output', cat: 'controls' },
+  { id: 'app', type: 'select', name: 'Application', cat: 'controls' },
+  { id: 'active_app', type: 'sensor', name: 'Active App', cat: 'controls' },
+  { id: 'play_state', type: 'sensor', name: 'Player State', cat: 'controls' },
+  { id: 'sound_format', type: 'sensor', name: 'Sound Format', cat: 'controls' },
+  { id: 'volume_up', type: 'button', name: 'Volume Up', cat: 'controls' },
+  { id: 'volume_down', type: 'button', name: 'Volume Down', cat: 'controls' },
+  { id: 'remote_up', type: 'button', name: 'Remote Up', cat: 'controls' },
+  { id: 'remote_down', type: 'button', name: 'Remote Down', cat: 'controls' },
+  { id: 'remote_left', type: 'button', name: 'Remote Left', cat: 'controls' },
+  { id: 'remote_right', type: 'button', name: 'Remote Right', cat: 'controls' },
+  { id: 'remote_ok', type: 'button', name: 'Remote OK', cat: 'controls' },
+  { id: 'remote_back', type: 'button', name: 'Remote Back', cat: 'controls' },
+  { id: 'remote_home', type: 'button', name: 'Remote Home', cat: 'controls' },
+  { id: 'remote_button', type: 'event', name: 'Remote Button', cat: 'controls' },
+  { id: 'play', type: 'button', name: 'Play', cat: 'controls' },
+  { id: 'pause', type: 'button', name: 'Pause', cat: 'controls' },
+  { id: 'play_pause', type: 'button', name: 'Play / Pause', cat: 'controls' },
+  { id: 'stop', type: 'button', name: 'Stop', cat: 'controls' },
+  { id: 'rewind', type: 'button', name: 'Rewind', cat: 'controls' },
+  { id: 'fast_forward', type: 'button', name: 'Fast Forward', cat: 'controls' },
+  { id: 'screensaver', type: 'button', name: 'Screen Saver', cat: 'controls' },
+  { id: 'screen_saver_active', type: 'binary_sensor', name: 'Screen Saver Active', cat: 'controls' },
+  { id: 'screensaver_mode', type: 'select', name: 'Screen Saver Mode', cat: 'controls' },
+  { id: 'restart', type: 'button', name: 'Restart', cat: 'controls' },
+  { id: 'power_off', type: 'button', name: 'Power Off', cat: 'controls' },
+  { id: 'power_on', type: 'button', name: 'Power On', cat: 'controls' },
+  { id: 'power', type: 'binary_sensor', name: 'Power', cat: 'controls' },
+
+  // OLED Care
+  { id: 'oled_panel_hours', type: 'sensor', name: 'OLED Panel Hours', cat: 'oled' },
+  { id: 'oled_hours_since_compensation', type: 'sensor', name: 'Hours Since Compensation', cat: 'oled' },
+  { id: 'oled_hours_until_compensation', type: 'sensor', name: 'Hours Until Compensation', cat: 'oled' },
+  { id: 'oled_hours_since_refresher', type: 'sensor', name: 'Hours Since Pixel Refresher', cat: 'oled' },
+  { id: 'oled_hours_until_refresher', type: 'sensor', name: 'Hours Until Pixel Refresher', cat: 'oled' },
+  { id: 'oled_compensation_status', type: 'sensor', name: 'Compensation Status', cat: 'oled' },
+  { id: 'oled_refresher_status', type: 'sensor', name: 'Pixel Refresher Status', cat: 'oled' },
+  { id: 'oled_screen_shift', type: 'switch', name: 'Screen Shift', cat: 'oled' },
+  { id: 'oled_logo_dimming', type: 'select', name: 'Logo Luminance Adjustment', cat: 'oled' },
+  { id: 'oled_short_cycles', type: 'sensor', name: 'Compensation Cycles Completed', cat: 'oled' },
+  { id: 'oled_refresher_cycles', type: 'sensor', name: 'Pixel Refresher Cycles Completed', cat: 'oled' },
+  { id: 'oled_failure_alerts', type: 'sensor', name: 'Panel Maintenance Alerts', cat: 'oled' },
+  { id: 'oled_asbl_dimmer', type: 'binary_sensor', name: 'ASBL Dimming Active', cat: 'oled' },
+  { id: 'pixel_refresher_schedule', type: 'switch', name: 'Pixel Refresher on Next Standby', cat: 'oled' },
+  { id: 'oled_cell_type', type: 'sensor', name: 'OLED Cell Type', cat: 'oled' },
+  { id: 'tcon_firmware', type: 'sensor', name: 'T-Con Firmware', cat: 'oled' },
+
+  // Video & HDMI Signal
+  { id: 'dynamic_range', type: 'sensor', name: 'Dynamic Range', cat: 'video' },
+  { id: 'picture_mode', type: 'sensor', name: 'Picture Mode', cat: 'video' },
+  { id: 'oled_light', type: 'number', name: 'OLED Light', cat: 'video' },
+  { id: 'video_signal', type: 'sensor', name: 'Video Signal', cat: 'video' },
+  { id: 'hdmi_link_mode', type: 'sensor', name: 'HDMI Link Mode', cat: 'video' },
+  { id: 'hdmi_chroma', type: 'sensor', name: 'HDMI Chroma', cat: 'video' },
+  { id: 'hdmi_hdcp', type: 'sensor', name: 'HDMI HDCP Version', cat: 'video' },
+  { id: 'hdmi_allm', type: 'binary_sensor', name: 'HDMI ALLM', cat: 'video' },
+  { id: 'hdmi_vrr', type: 'binary_sensor', name: 'HDMI VRR', cat: 'video' },
+  { id: 'video_colorimetry', type: 'sensor', name: 'Colorimetry', cat: 'video' },
+  { id: 'panel_dimming', type: 'sensor', name: 'Panel Dimming', cat: 'video' },
+  { id: 'ambient_light', type: 'sensor', name: 'Ambient Light', cat: 'video' },
+
+  // System & Telemetry
+  { id: 'soc_temperature', type: 'sensor', name: 'SoC Temperature', cat: 'system' },
+  { id: 'cpu_load', type: 'sensor', name: 'CPU Usage', cat: 'system' },
+  { id: 'memory_usage', type: 'sensor', name: 'Memory Usage', cat: 'system' },
+  { id: 'swap_usage', type: 'sensor', name: 'Swap Usage', cat: 'system' },
+  { id: 'wifi_signal', type: 'sensor', name: 'Wi-Fi Signal', cat: 'system' },
+  { id: 'download_rate', type: 'sensor', name: 'Download Rate', cat: 'system' },
+  { id: 'upload_rate', type: 'sensor', name: 'Upload Rate', cat: 'system' },
+  { id: 'flash_health', type: 'sensor', name: 'Flash Storage Health', cat: 'system' },
+  { id: 'flash_wear', type: 'sensor', name: 'Flash Wear Level', cat: 'system' },
+  { id: 'soc_architecture', type: 'sensor', name: 'SoC Architecture', cat: 'system' },
+  { id: 'gpu_clock', type: 'sensor', name: 'GPU Clock', cat: 'system' },
+  { id: 'app_storage_free', type: 'sensor', name: 'App Storage Available', cat: 'system' },
+  { id: 'mac_address', type: 'sensor', name: 'MAC Address', cat: 'system' },
+  { id: 'uptime', type: 'sensor', name: 'Uptime', cat: 'system' },
+  { id: 'watch_time_today', type: 'sensor', name: 'Watch Time Today', cat: 'system' },
+  { id: 'watch_time_week', type: 'sensor', name: 'Watch Time, Last 7 Days', cat: 'system' },
+  { id: 'watch_top_app_today', type: 'sensor', name: 'Most Watched Today', cat: 'system' },
+
+  // Diagnostics & Settings
+  { id: 'audio_output', type: 'sensor', name: 'Audio Output', cat: 'diagnostics' },
+  { id: 'remote_battery', type: 'sensor', name: 'Magic Remote Battery', cat: 'diagnostics' },
+  { id: 'sleep_timer', type: 'select', name: 'Sleep Timer', cat: 'diagnostics' },
+  { id: 'on_timer', type: 'switch', name: 'On Timer', cat: 'diagnostics' },
+  { id: 'off_timer', type: 'switch', name: 'Off Timer', cat: 'diagnostics' },
+  { id: 'standby_light', type: 'switch', name: 'Standby Light', cat: 'diagnostics' },
+  { id: 'logo_light', type: 'switch', name: 'Logo Light', cat: 'diagnostics' },
+  { id: 'ad_blocker', type: 'switch', name: 'Ad Blocker', cat: 'diagnostics' },
+  { id: 'tvweb_version', type: 'sensor', name: 'tvweb Version', cat: 'diagnostics' },
+  { id: 'server_update', type: 'update', name: 'Server Update', cat: 'diagnostics' }
+];
+
+/*
+ * LG's own settings (lgsettings.js) as entities: a switch, a select or a
+ * number each, published only where the TV has the setting - buildEntities is
+ * given its rows. Those an automation is likely to want are enabled; the rest
+ * are published disabled, as configuration, for anyone to enable. An HDMI
+ * input's settings are left out, since LG changes them only while that input
+ * is on screen, and Sound output has its own entity already.
+ */
+var LG_SETTING_ENTITIES = [
+  { type: 'select', id: 'sound_mode', row: 'soundMode', name: 'Sound Mode', cat: 'controls', enabled: true, icon: 'mdi:tune-vertical' },
+  { type: 'switch', id: 'bluetooth_speaker_mode', row: 'btSpeakerMode', name: 'Bluetooth Speaker Mode', cat: 'controls', enabled: true, icon: 'mdi:bluetooth-audio' },
+  { type: 'switch', id: 'simplink', row: 'simplinkEnable', name: 'SIMPLINK (HDMI-CEC)', cat: 'controls', enabled: true, icon: 'mdi:link-variant' },
+  { type: 'switch', id: 'auto_power_sync', row: 'simplinkAutoPowerOn', name: 'Auto Power Sync', cat: 'controls', enabled: true, icon: 'mdi:power-plug' },
+  { type: 'select', id: 'game_genre', row: 'gameGenre', name: 'Game Genre', cat: 'video', enabled: true, icon: 'mdi:gamepad-variant' },
+  { type: 'select', id: 'prevent_input_delay', row: 'inputOptimization', name: 'Prevent Input Delay', cat: 'video', enabled: true, icon: 'mdi:timer-outline' },
+  { type: 'switch', id: 'allm_setting', row: 'enableALLM', name: 'ALLM', cat: 'video', enabled: true, icon: 'mdi:gamepad-square' },
+  { type: 'select', id: 'digital_sound_output', row: 'soundOutputDigital', name: 'Digital Sound Output', cat: 'controls', icon: 'mdi:surround-sound' },
+  { type: 'number', id: 'balance', row: 'audioBalance', name: 'Balance', cat: 'controls', icon: 'mdi:scale-balance' },
+  { type: 'switch', id: 'automatic_volume', row: 'autoVolume', name: 'Automatic Volume', cat: 'controls', icon: 'mdi:volume-equal' },
+  { type: 'switch', id: 'earc', row: 'eArcSupport', name: 'eARC', cat: 'controls', icon: 'mdi:audio-input-rca' },
+  { type: 'switch', id: 'ip_control', row: 'ipControl', name: 'IP Control', cat: 'controls', icon: 'mdi:lan' },
+  { type: 'switch', id: 'vrr_gsync', row: 'gameOptimization', name: 'VRR & G-Sync', cat: 'video', icon: 'mdi:sync' },
+  { type: 'switch', id: 'freesync_premium', row: 'freesync', name: 'AMD FreeSync Premium', cat: 'video', icon: 'mdi:sync' },
+  { type: 'select', id: 'dark_room_mode', row: 'darkMode', name: 'Dark Room Mode', cat: 'video', icon: 'mdi:weather-night' },
+  { type: 'number', id: 'black_stabilizer', row: 'blackStabilizer', name: 'Black Stabilizer', cat: 'video', icon: 'mdi:brightness-4' },
+  { type: 'number', id: 'white_stabilizer', row: 'whiteStabilizer', name: 'White Stabilizer', cat: 'video', icon: 'mdi:brightness-5' },
+  { type: 'switch', id: 'ai_game_sound', row: 'aigamesound', name: 'AI Game Sound', cat: 'video', icon: 'mdi:speaker-wireless' },
+  { type: 'switch', id: 'screen_saver_ads', row: 'screenSaverAd', name: 'Screen Saver Ads', cat: 'diagnostics', icon: 'mdi:advertisements' },
+  { type: 'switch', id: 'home_sponsored_tiles', row: 'homePromotion', name: 'Sponsored Tiles on Home', cat: 'diagnostics', icon: 'mdi:advertisements' },
+  { type: 'switch', id: 'home_recommendations', row: 'contentRecommendation', name: 'Recommendations on Home', cat: 'diagnostics', icon: 'mdi:advertisements' },
+  { type: 'switch', id: 'ads_while_watching', row: 'livePromotion', name: 'Ads While Watching', cat: 'diagnostics', icon: 'mdi:advertisements' },
+  { type: 'switch', id: 'smart_tips', row: 'aiNudge', name: 'Smart Tips', cat: 'diagnostics', icon: 'mdi:lightbulb-outline' },
+  { type: 'switch', id: 'smart_tips_in_settings', row: 'aiSettingsNudge', name: 'Smart Tips in Settings', cat: 'diagnostics', icon: 'mdi:lightbulb-outline' }
+];
+for (var le = 0; le < LG_SETTING_ENTITIES.length; le++) {
+  var _l = LG_SETTING_ENTITIES[le];
+  HA_ENTITIES.push({ id: _l.id, type: _l.type, name: _l.name, cat: _l.cat });
+}
+
+/*
+ * One entity per row the TV has. Values come in telemetry as lgs, keyed by
+ * row; commands go to <prefix>/command/lgs/<row>.
+ */
+function lgSettingEntities(rows, topic) {
+  var byRow = {}, out = [];
+  (rows || []).forEach(function (r) { byRow[r.id] = r; });
+  LG_SETTING_ENTITIES.forEach(function (e) {
+    var r = byRow[e.row];
+    if (!r) return;
+    // A retained message from before the settings were published has no lgs.
+    var state = '(value_json.lgs or {}).get("' + e.row + '")';
+    var payload = {
+      name: e.name,
+      command_topic: topic.command('lgs/' + e.row),
+      state_topic: topic.telemetry,
+      icon: e.icon
+    };
+    if (!e.enabled) {
+      payload.enabled_by_default = false;
+      payload.entity_category = 'config';
+    }
+    if (e.type === 'switch') {
+      payload.value_template = '{{ "ON" if ' + state + ' else "OFF" }}';
+      payload.payload_on = 'ON';
+      payload.payload_off = 'OFF';
+    } else if (e.type === 'number') {
+      payload.value_template = '{{ ' + state + ' }}';
+      payload.min = r.min;
+      payload.max = r.max;
+      payload.step = 1;
+      payload.mode = 'slider';
+    } else {
+      var ids = [], names = {};
+      r.choices.forEach(function (c) { ids.push(c.value); names[c.value] = c.label; });
+      withSelect(payload, namedSelect(ids, names, state));
+    }
+    out.push({ type: e.type, id: e.id, payload: payload });
+  });
+  return out;
+}
+
+var ENTITY_CATEGORIES = {};
+for (var i = 0; i < HA_ENTITIES.length; i++) {
+  var _ent = HA_ENTITIES[i];
+  ENTITY_CATEGORIES[_ent.type + '.' + _ent.id] = _ent.cat;
+  if (!ENTITY_CATEGORIES[_ent.id]) {
+    ENTITY_CATEGORIES[_ent.id] = _ent.cat;
+  }
+}
+
+function entityCategory(e) {
+  if (!e) return 'diagnostics';
+  return ENTITY_CATEGORIES[e.type + '.' + e.id] || ENTITY_CATEGORIES[e.id] || 'diagnostics';
+}
+
+var SETTINGS_APP_ID = 'com.palm.app.settings';
+
+/*
+ * Launch App options by name. Before the app list has loaded, the common apps
+ * stand in so the select is not empty. A name two apps share gets the id of
+ * the second, since the select needs every option to be distinct.
+ */
+var DEFAULT_APPS = {
+  'com.webos.app.livetv': 'Live TV',
+  'youtube.leanback.v4': 'YouTube',
+  'netflix': 'Netflix',
+  'amazon': 'Prime Video',
+  'spotify-beehive': 'Spotify',
+  'com.apple.appletv': 'Apple TV'
+};
+
+function appNames(installed) {
+  var byId = {}, taken = {};
+  var add = function (id, title) {
+    if (byId[id]) return;
+    var name = title || id;
+    if (taken[name]) name += ' (' + id + ')';
+    taken[name] = true;
+    byId[id] = name;
+  };
+  if (!installed || !installed.length) {
+    for (var d in DEFAULT_APPS) add(d, DEFAULT_APPS[d]);
+  } else {
+    for (var i = 0; i < installed.length; i++) add(installed[i].id, installed[i].title);
+  }
+  // LG's Settings is a system app the installed list leaves out, but it
+  // launches like any other: offered so a non-admin client can open it.
+  add(SETTINGS_APP_ID, 'Settings');
+  return byId;
+}
+
+/*
+ * The Launch App select's attributes: each option's app id, and for a
+ * launcher showing the apps as tiles, each app's icon on the LAN icon server
+ * (iconBaseUrl, when it is listening) and its appinfo.json iconColor.
+ */
+function appAttributes(toId, byId, installed, iconBaseUrl) {
+  var attrs = { app_ids: toId };
+  var id;
+  if (iconBaseUrl) {
+    var icons = {};
+    for (id in byId) {
+      if (APP_ID_RE.test(id)) icons[id] = iconBaseUrl + id + '.png';
+    }
+    attrs.app_icons = icons;
+  }
+  var colors = {}, anyColor = false;
+  for (var i = 0; i < (installed || []).length; i++) {
+    var color = hexColor(installed[i].iconColor);
+    if (color && byId[installed[i].id]) {
+      colors[installed[i].id] = color;
+      anyColor = true;
+    }
+  }
+  if (anyColor) attrs.app_colors = colors;
+  return attrs;
+}
+
+/*
+ * A select that shows names but sends and reads ids. Where two ids share a
+ * name (optical and external_optical are both "Optical"), the first id is the
+ * one sent. A value sent that is not a listed name goes through as written,
+ * so an automation still sending the id keeps working.
+ */
+// Each output's name, including one the names module only spells out.
+function soundOutputNames(ids) {
+  var map = {};
+  ids.forEach(function (id) { map[id] = names.soundOutput(id).display; });
+  return map;
+}
+
+function namedSelect(ids, names, stateExpr) {
+  var toId = {}, toName = {}, options = [];
+  for (var i = 0; i < ids.length; i++) {
+    var name = names[ids[i]] || ids[i];
+    toName[ids[i]] = name;
+    if (!toId[name]) { toId[name] = ids[i]; options.push(name); }
+  }
+  return {
+    options: options,
+    command_template: '{{ ' + JSON.stringify(toId) + '.get(value, value) }}',
+    value_template: '{{ ' + JSON.stringify(toName) + '.get(' + stateExpr + ', "None") }}'
+  };
+}
+
+function withSelect(payload, sel) {
+  for (var k in sel) payload[k] = sel[k];
+  return payload;
+}
+
+function selectState(expr, options) {
+  var quoted = [];
+  for (var i = 0; i < options.length; i++) quoted.push('\'' + options[i] + '\'');
+  return '{{ (' + expr + ') if (' + expr + ') in [' + quoted.join(', ') + '] else \'None\' }}';
+}
+
+/*
+ * What the dashboard reports about the bridge. The MQTT client is wired up
+ * once at startup against the config as it was then, so this is the only way
+ * to tell whether the broker settings on screen are the ones actually running.
+ */
+
+var RETIRED_ENTITIES = [
+    { type: 'sensor', id: 'oled_screen_shift' },
+    { type: 'sensor', id: 'oled_logo_dimming' },
+    // Now a number, which sets it as well as showing it.
+    { type: 'sensor', id: 'oled_light' },
+    // LG's PHY error count: a 0-15 counter that wraps, mostly of errors the
+    // HDMI 2.1 link corrects itself, so it said nothing anyone could act on.
+    { type: 'sensor', id: 'hdmi_cable_errors' },
+    // The SoC current, a fixed factory figure (#477), read value_json.power.
+    { type: 'sensor', id: 'soc_current' },
+    // A test build's sensor for a TV that does not sleep when off (#296, not merged).
+    { type: 'binary_sensor', id: 'standby_stuck' }
+  ];
+
+var HDMI_DIAG_ONLY = {
+      hdmi_link_mode: 'phy_mode', hdmi_chroma: 'chroma', hdmi_hdcp: 'hdcp',
+      hdmi_allm: 'allm', hdmi_vrr: 'vrr'
+    };
+
+    var OLED_ONLY = {
+      oled_panel_hours: 1, oled_hours_since_compensation: 1,
+      oled_hours_until_compensation: 1, oled_compensation_status: 1,
+      oled_hours_since_refresher: 1,
+      oled_hours_until_refresher: 1, oled_refresher_status: 1,
+      oled_short_cycles: 1, oled_refresher_cycles: 1,
+      oled_failure_alerts: 1, oled_asbl_dimmer: 1,
+      oled_cell_type: 1, tcon_firmware: 1,
+      oled_screen_shift: 1, oled_logo_dimming: 1,
+      pixel_refresher_schedule: 1
+    };
+
+function clearRetired(publishFn, discPfx, devId) {
+  for (var r = 0; r < RETIRED_ENTITIES.length; r++) {
+    publishFn(discPfx + '/' + RETIRED_ENTITIES[r].type + '/' + devId + '/' +
+              RETIRED_ENTITIES[r].id + '/config', '', true);
+  }
+}
+
+/*
+ * LG's On or Off Timer as a switch, with its time and repeat days as
+ * attributes. The time and days are set from the dashboard.
+ */
+function powerTimerPayload(topic, which, name, icon) {
+  var timer = '(value_json.powerTimers or {}).get("' + which + '")';
+  return {
+    name: name,
+    command_topic: topic.command('powerTimer/' + which),
+    state_topic: topic.telemetry,
+    json_attributes_topic: topic.telemetry,
+    // Read with get(): a field missing from the timer would be logged by Home Assistant (#761).
+    value_template: '{{ "ON" if (' + timer + ' or {}).get("enabled") else "OFF" }}',
+    json_attributes_template: '{% set t = ' + timer + ' %}' +
+      '{% set names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] %}' +
+      '{% set ns = namespace(days=[]) %}{% for d in ((t.get("days") or []) if t else []) %}{% set ns.days = ns.days + [names[d]] %}{% endfor %}' +
+      '{{ {"time": t.get("time"), "days": ns.days} | tojson if t else "{}" }}',
+    payload_on: 'on',
+    payload_off: 'off',
+    state_on: 'ON',
+    state_off: 'OFF',
+    icon: icon
+  };
+}
+
+function buildEntities(opts) {
+  opts = opts || {};
+  var topic = topics(opts.pfx);
+  var installedApps = opts.installedApps || [];
+  var lastPicModes = opts.pictureModes || [];
+  var soundOutputIds = (opts.soundOutputs && opts.soundOutputs.length) ? opts.soundOutputs : Object.keys(names.SOUND_OUTPUTS);
+
+  // telemetry's volume_control: the level can be set, or only stepped (a
+  // receiver on HDMI ARC/eARC), or neither (optical). Stepping and mute are
+  // available in the first two.
+  var volumeLevelAvailability = [{
+    topic: topic.telemetry,
+    value_template: '{{ "online" if (value_json.volume_control or "level") == "level" else "offline" }}'
+  }];
+  var volumeStepAvailability = [{
+    topic: topic.telemetry,
+    value_template: '{{ "offline" if value_json.volume_control == "none" else "online" }}'
+  }];
+
+  /** @type {any[]} */
+  var entities = [
+      {
+        type: 'sensor', id: 'soc_temperature',
+        payload: {
+          name: 'SoC Temperature',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.temp }}',
+          unit_of_measurement: '°C',
+          device_class: 'temperature',
+          state_class: 'measurement'
+        }
+      },
+      {
+        type: 'sensor', id: 'cpu_load',
+        payload: {
+          name: 'CPU Usage',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.load }}',
+          unit_of_measurement: '%',
+          state_class: 'measurement',
+          icon: 'mdi:cpu-64-bit'
+        }
+      },
+      {
+        type: 'sensor', id: 'memory_usage',
+        payload: {
+          name: 'Memory Usage',
+          state_topic: topic.telemetry,
+          value_template: '{{ ((value_json.mem.total - value_json.mem.avail) / value_json.mem.total * 100) | round(1) if value_json.mem.total > 0 else 0 }}',
+          unit_of_measurement: '%',
+          icon: 'mdi:memory'
+        }
+      },
+      {
+        type: 'sensor', id: 'swap_usage',
+        payload: {
+          name: 'Swap Usage',
+          state_topic: topic.telemetry,
+          value_template: '{{ ((value_json.swap.total - value_json.swap.free) / value_json.swap.total * 100) | round(1) if value_json.swap.total > 0 else 0 }}',
+          unit_of_measurement: '%',
+          icon: 'mdi:server'
+        }
+      },
+      {
+        type: 'sensor', id: 'wifi_signal',
+        payload: {
+          name: 'Wi-Fi Signal',
+          state_topic: topic.telemetry,
+          // none, not 0: a wired set has no signal to report, and 0 dBm would
+          // enter the history as though it had been measured.
+          value_template: '{{ value_json.wifi.level if value_json.wifi else none }}',
+          unit_of_measurement: 'dBm',
+          device_class: 'signal_strength',
+          state_class: 'measurement'
+        }
+      },
+      {
+        type: 'sensor', id: 'download_rate',
+        payload: {
+          name: 'Download Rate',
+          state_topic: topic.telemetry,
+          value_template: '{{ (value_json.net.rx / 1024) | round(1) if value_json.net else 0 }}',
+          unit_of_measurement: 'kB/s',
+          icon: 'mdi:download-network'
+        }
+      },
+      {
+        type: 'sensor', id: 'upload_rate',
+        payload: {
+          name: 'Upload Rate',
+          state_topic: topic.telemetry,
+          value_template: '{{ (value_json.net.tx / 1024) | round(1) if value_json.net else 0 }}',
+          unit_of_measurement: 'kB/s',
+          icon: 'mdi:upload-network'
+        }
+      },
+      {
+        type: 'sensor', id: 'flash_health',
+        payload: {
+          name: 'Flash Storage Health',
+          state_topic: topic.telemetry,
+          /* pre_eol_info, not the inverted wear band: emmc.health is derived
+             from the same register as emmc.wear, so the two sensors were
+             reporting one number twice. The name still fits - Normal, Warning
+             and Urgent are exactly a health status. */
+          value_template: '{{ value_json.emmc.eol }}',
+          icon: 'mdi:harddisk'
+        }
+      },
+      {
+        type: 'sensor', id: 'flash_wear',
+        payload: {
+          name: 'Flash Wear Level',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.emmc.wear }}',
+          icon: 'mdi:wrench-clock'
+        }
+      },
+      {
+        type: 'sensor', id: 'active_app',
+        payload: {
+          name: 'Active App',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.display_title or value_json.app_name or value_json.app }}',
+          // The title changes when an app is renamed; the id does not. A
+          // remote that only acts in certain apps checks the id.
+          json_attributes_topic: topic.state('application/remote'),
+          json_attributes_template: '{{ value_json | tojson }}',
+          icon: 'mdi:television-play'
+        }
+      },
+      {
+        type: 'sensor', id: 'play_state',
+        payload: {
+          name: 'Player State',
+          state_topic: topic.telemetry,
+          // idle when the media service answers with nothing playing, and
+          // absent when it does not answer: nothing playing and nothing to ask
+          // are different things. On an external input this tracks the HDMI
+          // pipeline rather than the source's own transport state.
+          value_template: '{{ value_json.media.state if value_json.media else None }}',
+          icon: 'mdi:play-pause'
+        }
+      },
+      {
+        type: 'sensor', id: 'dynamic_range',
+        payload: {
+          name: 'Dynamic Range',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.picture.dynamicRange if value_json.picture else "SDR" }}',
+          icon: 'mdi:video-vintage'
+        }
+      },
+      {
+        type: 'sensor', id: 'picture_mode',
+        payload: {
+          name: 'Picture Mode',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.picture.mode if value_json.picture else "Unknown" }}',
+          icon: 'mdi:palette'
+        }
+      },
+      {
+        /*
+         * The current picture mode's light: the TV keeps one per mode, so
+         * switching mode moves it. The live picture topic follows the remote
+         * and mode changes as they happen, not on the telemetry interval.
+         */
+        type: 'number', id: 'oled_light',
+        payload: {
+          name: opts.isOled === false ? 'Backlight' : 'OLED Light',
+          command_topic: topic.command('backlight'),
+          state_topic: topic.state('picture/backlight'),
+          min: 0,
+          max: 100,
+          step: 1,
+          mode: 'slider',
+          unit_of_measurement: '%',
+          icon: 'mdi:brightness-6'
+        }
+      },
+      {
+        type: 'sensor', id: 'video_signal',
+        payload: {
+          name: 'Video Signal',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.signal or "Internal / Standby" }}',
+          icon: 'mdi:video-input-hdmi'
+        }
+      },
+      {
+        type: 'sensor', id: 'hdmi_link_mode',
+        payload: {
+          name: 'HDMI Link Protocol',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.hdmi_diag.phy_mode if value_json.hdmi_diag and value_json.hdmi_diag.phy_mode else none }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:video-input-hdmi'
+        }
+      },
+      {
+        type: 'sensor', id: 'hdmi_chroma',
+        payload: {
+          name: 'HDMI Chroma Format',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.hdmi_diag.chroma if value_json.hdmi_diag and value_json.hdmi_diag.chroma else none }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:palette'
+        }
+      },
+      {
+        type: 'sensor', id: 'hdmi_hdcp',
+        payload: {
+          name: 'HDMI HDCP Version',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.hdmi_diag.hdcp if value_json.hdmi_diag and value_json.hdmi_diag.hdcp else none }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:lock-check'
+        }
+      },
+      {
+        type: 'binary_sensor', id: 'hdmi_allm',
+        payload: {
+          name: 'Auto Low Latency Mode (ALLM)',
+          state_topic: topic.telemetry,
+          value_template: '{{ ("ON" if value_json.hdmi_diag.allm else "OFF") if value_json.hdmi_diag and value_json.hdmi_diag.allm is not none else none }}',
+          icon: 'mdi:gamepad-variant'
+        }
+      },
+      {
+        type: 'binary_sensor', id: 'hdmi_vrr',
+        payload: {
+          name: 'Variable Refresh Rate (VRR)',
+          state_topic: topic.telemetry,
+          value_template: '{{ ("ON" if value_json.hdmi_diag.vrr else "OFF") if value_json.hdmi_diag and value_json.hdmi_diag.vrr is not none else none }}',
+          icon: 'mdi:speedometer'
+        }
+      },
+      {
+        type: 'sensor', id: 'video_colorimetry',
+        payload: {
+          name: 'Video Color Space',
+          state_topic: topic.telemetry,
+          // none, not "BT.709": defaulting to a colour space states a fact
+          // about the signal that was never read, and states it wrongly on
+          // anything wide-gamut. A set that does not report one reports none.
+          value_template: '{{ value_json.picture_engine.colorimetry if value_json.picture_engine and value_json.picture_engine.colorimetry else none }}',
+          icon: 'mdi:palette-swatch'
+        }
+      },
+      {
+        type: 'sensor', id: 'sound_format',
+        payload: {
+          name: 'Sound Format',
+          state_topic: topic.telemetry,
+          // The format of what is playing, as the dashboard's Sound panel shows
+          // it; None while nothing plays, rather than unknown, so automations
+          // can tell the two apart from the TV being unreachable.
+          // Read with get(): the input often lacks immersive, and Home
+          // Assistant logs each field a template reads that is missing (#761).
+          value_template: '{% set i = (value_json.sound.input if value_json.sound else none) or {} %}' +
+            '{{ ((i.get("codec") or "") ~ (" · " ~ i.get("immersive") if i.get("immersive") else "")) if i else "None" }}',
+          json_attributes_topic: topic.telemetry,
+          json_attributes_template: '{% set i = value_json.sound.input or {} %}' +
+            '{{ {"codec": i.get("codec_raw") or none, "immersive": i.get("immersive_raw") or none} | tojson }}',
+          icon: 'mdi:surround-sound'
+        }
+      },
+      {
+        type: 'sensor', id: 'audio_output',
+        payload: {
+          name: 'Audio Output',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.audio_output or "Internal" }}',
+          icon: 'mdi:speaker'
+        }
+      },
+      {
+        type: 'sensor', id: 'uptime',
+        payload: {
+          name: 'Uptime',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.bootTime }}',
+          device_class: 'timestamp',
+          entity_category: 'diagnostic',
+          icon: 'mdi:clock-start'
+        }
+      },
+      /*
+       * Watch time, from the history the dashboard turns on: today's resets
+       * at the TV's local midnight, which total_increasing takes as a new
+       * cycle. Screen-off time is not in either.
+       */
+      {
+        type: 'sensor', id: 'watch_time_today',
+        payload: {
+          name: 'Watch Time Today',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.watch.today_h if value_json.watch else none }}',
+          unit_of_measurement: 'h',
+          device_class: 'duration',
+          state_class: 'total_increasing',
+          icon: 'mdi:television-classic'
+        }
+      },
+      {
+        type: 'sensor', id: 'watch_time_week',
+        payload: {
+          name: 'Watch Time, Last 7 Days',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.watch.week_h if value_json.watch else none }}',
+          unit_of_measurement: 'h',
+          device_class: 'duration',
+          state_class: 'measurement',
+          icon: 'mdi:calendar-week'
+        }
+      },
+      {
+        type: 'sensor', id: 'watch_top_app_today',
+        payload: {
+          name: 'Most Watched Today',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.watch.top_today if value_json.watch and value_json.watch.top_today else none }}',
+          icon: 'mdi:trophy-outline'
+        }
+      },
+      {
+        /*
+         * This server's own version, not the TV's - the device's sw_version
+         * already carries the firmware. The id stays tvweb_version: it is the
+         * unique_id an existing install is already discovered under, and
+         * changing it would orphan that entity and register a second one.
+         * Diagnostic: it belongs beside the firmware, not among the readings.
+         */
+        type: 'sensor', id: 'tvweb_version',
+        payload: {
+          name: 'Server Version',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.tvwebVersion }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:tag-outline'
+        }
+      },
+      {
+        /*
+         * For the wake_on_lan.send_magic_packet action the Home Assistant
+         * guide sets up, where the address is currently left to the reader.
+         * Diagnostic: it belongs on the device page beside the firmware, and
+         * it is read once rather than watched.
+         */
+        type: 'sensor', id: 'mac_address',
+        payload: {
+          name: 'MAC Address',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.mac if value_json.mac else none }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:ethernet'
+        }
+      },
+      {
+        type: 'sensor', id: 'remote_battery',
+        payload: {
+          name: 'Remote Battery',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.remote.battery if value_json.remote and value_json.remote.battery is not none else none }}',
+          unit_of_measurement: '%',
+          device_class: 'battery',
+          state_class: 'measurement',
+          entity_category: 'diagnostic',
+          icon: 'mdi:remote'
+        }
+      },
+      {
+        type: 'sensor', id: 'soc_architecture',
+        payload: {
+          name: 'SoC Architecture',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.hardware.soc_arch if value_json.hardware and value_json.hardware.soc_arch else "Unknown" }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:cpu-64-bit'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_cell_type',
+        payload: {
+          name: 'OLED Cell Info',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.panel_silicon.cell if value_json.panel_silicon and value_json.panel_silicon.cell else none }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:monitor-cell'
+        }
+      },
+      {
+        type: 'sensor', id: 'tcon_firmware',
+        payload: {
+          name: 'TCON Firmware',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.panel_silicon.tcon_firmware if value_json.panel_silicon and value_json.panel_silicon.tcon_firmware else none }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:chip'
+        }
+      },
+      {
+        type: 'switch', id: 'display_panel',
+        payload: {
+          name: (opts.isOled === false) ? 'Display Panel' : 'OLED Display Panel',
+          command_topic: topic.command('screen'),
+          state_topic: topic.state('screen'),
+          payload_on: 'ON',
+          payload_off: 'OFF',
+          icon: 'mdi:television-ambient-light'
+        }
+      },
+      {
+        type: 'switch', id: 'mute',
+        payload: {
+          name: 'Mute',
+          command_topic: topic.command('mute'),
+          state_topic: topic.telemetry,
+          value_template: '{{ \'ON\' if value_json.muted else \'OFF\' }}',
+          payload_on: 'ON',
+          payload_off: 'OFF',
+          icon: 'mdi:volume-mute',
+          // Refused with the volume ("Current Scenario doesn't support mute").
+          availability: volumeStepAvailability
+        }
+      },
+      {
+        type: 'number', id: 'volume',
+        payload: {
+          name: 'Volume',
+          command_topic: topic.command('volume'),
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.volume }}',
+          min: 0,
+          max: 100,
+          step: 1,
+          icon: 'mdi:volume-high',
+          availability: volumeLevelAvailability
+        }
+      },
+      {
+        type: 'select', id: 'input_source',
+        payload: withSelect({
+          name: 'Input Source',
+          command_topic: topic.command('input'),
+          state_topic: topic.telemetry,
+          icon: 'mdi:video-input-hdmi'
+        }, namedSelect(Object.keys(names.INPUTS), names.INPUTS, 'value_json.app'))
+      },
+      {
+        type: 'text', id: 'screen_notification',
+        payload: {
+          name: 'Screen Notification',
+          command_topic: topic.command('toast'),
+          icon: 'mdi:message-text-outline',
+          mode: 'text'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_panel_hours',
+        payload: {
+          name: 'OLED Panel Hours',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.panel_hours if value_json.oled else 0 }}',
+          unit_of_measurement: 'h',
+          state_class: 'total_increasing',
+          icon: 'mdi:timer-outline'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_hours_since_compensation',
+        payload: {
+          name: 'OLED Hours Since Short Cycle',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.hours_since_comp if value_json.oled else 0 }}',
+          unit_of_measurement: 'h',
+          state_class: 'measurement',
+          icon: 'mdi:progress-clock'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_hours_until_compensation',
+        payload: {
+          name: 'OLED Hours Until Short Cycle',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.hours_until_comp if value_json.oled else 0 }}',
+          unit_of_measurement: 'h',
+          state_class: 'measurement',
+          icon: 'mdi:timer-sand'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_hours_since_refresher',
+        payload: {
+          name: 'OLED Hours Since Pixel Refresher',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.hours_since_refresher if value_json.oled else 0 }}',
+          unit_of_measurement: 'h',
+          state_class: 'measurement',
+          icon: 'mdi:history'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_hours_until_refresher',
+        payload: {
+          name: 'OLED Hours Until Pixel Refresher',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.hours_until_refresher if value_json.oled else 0 }}',
+          unit_of_measurement: 'h',
+          state_class: 'measurement',
+          icon: 'mdi:update'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_compensation_status',
+        payload: {
+          name: 'OLED Compensation Status',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.comp_status if value_json.oled else "Unknown" }}',
+          icon: 'mdi:autorenew'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_refresher_status',
+        payload: {
+          name: 'Pixel Refresher Status',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.refresher_status if value_json.oled else "Unknown" }}',
+          icon: 'mdi:television-shimmer'
+        }
+      },
+      {
+        /*
+         * Both of these are settings rather than readings, so they carry their
+         * own state and need no separate sensor. The panel protections beside
+         * them - ASBL, GSR - are hardware behaviour and stay read-only.
+         */
+        type: 'switch', id: 'oled_screen_shift',
+        payload: {
+          name: 'OLED Screen Shift',
+          command_topic: topic.command('screenShift'),
+          state_topic: topic.telemetry,
+          value_template: '{{ ("ON" if value_json.oled.screen_shift == "on" else "OFF") if value_json.oled and value_json.oled.screen_shift else none }}',
+          payload_on: 'on',
+          payload_off: 'off',
+          state_on: 'ON',
+          state_off: 'OFF',
+          icon: 'mdi:arrow-all'
+        }
+      },
+      {
+        type: 'select', id: 'oled_logo_dimming',
+        payload: {
+          name: 'OLED Logo Dimming',
+          command_topic: topic.command('logoDimming'),
+          state_topic: topic.telemetry,
+          options: logoDimmingNames,
+          command_template: '{{ ' + JSON.stringify(logoDimmingIds) + '[value] }}',
+          value_template: '{{ ' + JSON.stringify(names.LOGO_DIMMING) + '.get(value_json.oled.logo_dimming, ' + JSON.stringify(names.LOGO_DIMMING.off) + ') if value_json.oled and value_json.oled.logo_dimming else none }}',
+          icon: 'mdi:television-guide'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_short_cycles',
+        payload: {
+          name: 'OLED Short Cycles Completed',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.comp_cycles if value_json.oled and value_json.oled.comp_cycles is not none else none }}',
+          state_class: 'total_increasing',
+          entity_category: 'diagnostic',
+          icon: 'mdi:counter'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_refresher_cycles',
+        payload: {
+          name: 'OLED Refresher Cycles Completed',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.refresher_cycles if value_json.oled and value_json.oled.refresher_cycles is not none else none }}',
+          state_class: 'total_increasing',
+          entity_category: 'diagnostic',
+          icon: 'mdi:counter'
+        }
+      },
+      {
+        type: 'sensor', id: 'oled_failure_alerts',
+        payload: {
+          name: 'OLED Compensation Failures',
+          state_topic: topic.telemetry,
+          value_template: '{{ value_json.oled.failure_alerts if value_json.oled and value_json.oled.failure_alerts is not none else 0 }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:alert-circle-outline'
+        }
+      },
+      {
+        type: 'binary_sensor', id: 'oled_asbl_dimmer',
+        payload: {
+          name: 'OLED ASBL Protection',
+          state_topic: topic.telemetry,
+          value_template: '{{ "ON" if value_json.oled and value_json.oled.asbl_protection == "Active" else "OFF" }}',
+          entity_category: 'diagnostic',
+          icon: 'mdi:shield-check'
+        }
+      },
+      {
+        type: 'switch', id: 'pixel_refresher_schedule',
+        payload: {
+          name: 'Schedule Pixel Refresher',
+          command_topic: topic.command('refresher'),
+          state_topic: topic.telemetry,
+          value_template: '{{ \'ON\' if value_json.oled and value_json.oled.refresher_status == \'' +
+            names.REFRESHER_STATUSES.cancel_schedule + '\' else \'OFF\' }}',
+          payload_on: 'schedule',
+          payload_off: 'cancel',
+          icon: 'mdi:television-shimmer'
+        }
+      },
+      {
+        type: 'select', id: 'picture_mode',
+        payload: withSelect({
+          name: 'Picture Mode',
+          command_topic: topic.command('picture_mode'),
+          state_topic: topic.telemetry,
+          icon: 'mdi:image-filter-black-white'
+        /* The settable modes depend on the dynamic range of what is playing,
+           so this is whatever the TV last said it would accept. Discovery is
+           republished when that set changes - see publishTelemetry. */
+        }, (function (ids) {
+          return namedSelect(ids, picModeNames(ids), '(value_json.picture.mode_raw if value_json.picture else "standard")');
+        })(lastPicModes.length
+            ? lastPicModes.map(function (m) { return m.value; })
+            : ['expert1', 'expert2', 'cinema', 'game', 'standard', 'eco', 'sports']))
+      },
+      {
+        type: 'select', id: 'energy_saving',
+        payload: {
+          name: 'Energy Saving Step',
+          command_topic: topic.command('energySaving'),
+          state_topic: topic.state('picture/energySaving'),
+          options: names.ENERGY_SAVING_STEPS.slice(),
+          icon: 'mdi:brightness-auto'
+        }
+      },
+      {
+        type: 'select', id: 'sound_output',
+        payload: withSelect({
+          name: 'Sound Output',
+          command_topic: topic.command('sound_output'),
+          state_topic: topic.telemetry,
+          icon: 'mdi:speaker'
+        // The outputs this TV offers, as LG's own menu decides them, once it
+        // has said; every known output until then.
+        }, namedSelect(soundOutputIds, soundOutputNames(soundOutputIds),
+          '(value_json.sound.output_raw if value_json.sound else "tv_speaker")'))
+      },
+      {
+        type: 'select', id: 'app',
+        payload: (function () {
+          var byId = appNames(installedApps);
+          var toId = {};
+          for (var id in byId) toId[byId[id]] = id;
+          return {
+            name: 'Launch App',
+            command_topic: topic.command('launch_app'),
+            // A name outside the list goes through as written, so an app id
+            // sent by an older automation still launches.
+            command_template: '{{ ' + JSON.stringify(toId) + '.get(value, value) }}',
+            state_topic: topic.telemetry,
+            value_template: '{{ ' + JSON.stringify(byId) + '.get(value_json.app_id, "None") }}',
+            // Each option's app id, for a client that keeps a chosen app by id:
+            // a title can change while the id stays.
+            json_attributes_topic: topic.telemetry,
+            json_attributes_template: '{{ ' + JSON.stringify(appAttributes(toId, byId, installedApps, opts.iconBaseUrl)) + ' | tojson }}',
+            options: Object.keys(toId),
+            icon: 'mdi:apps'
+          };
+        })()
+      },
+      {
+        /*
+         * Sleep timer. 15 is not an accepted value even though it looks like
+         * one - the settings service rejects it. Valid: off, 10, 30, 60, 90, 120.
+         */
+        type: 'sensor', id: 'gpu_clock',
+        payload: {
+          name: 'GPU Clock', state_topic: topic.telemetry,
+          value_template: '{{ value_json.gpuMhz if value_json.gpuMhz else none }}',
+          unit_of_measurement: 'MHz', state_class: 'measurement', icon: 'mdi:expansion-card'
+        }
+      },
+      {
+        type: 'sensor', id: 'panel_dimming',
+        payload: {
+          name: 'Panel Dimming', state_topic: topic.telemetry,
+          value_template: '{{ value_json.dimming }}', icon: 'mdi:brightness-auto'
+        }
+      },
+      {
+        type: 'sensor', id: 'app_storage_free',
+        payload: {
+          name: 'App Storage Free', state_topic: topic.telemetry,
+          value_template: '{{ (value_json.appStorage.freeMb / 1024) | round(1) if value_json.appStorage else none }}',
+          unit_of_measurement: 'GB', state_class: 'measurement', icon: 'mdi:harddisk'
+        }
+      },
+      {
+        type: 'sensor', id: 'ambient_light',
+        payload: {
+          name: 'Ambient Light', state_topic: topic.telemetry,
+          value_template: '{{ value_json.lightSensor.lux if value_json.lightSensor else none }}',
+          device_class: 'illuminance', state_class: 'measurement', icon: 'mdi:brightness-5'
+        }
+      },
+      {
+        type: 'select', id: 'sleep_timer',
+        payload: {
+          name: 'Sleep Timer',
+          command_topic: topic.command('sleepTimer'),
+          state_topic: topic.telemetry,
+          options: ['Off', '10 min', '30 min', '60 min', '90 min', '120 min'],
+          command_template: '{{ {"Off":"off","10 min":"10","30 min":"30","60 min":"60","90 min":"90","120 min":"120"}[value] }}',
+          value_template: '{{ {"off":"Off","10":"10 min","30":"30 min","60":"60 min","90":"90 min","120":"120 min"}.get(value_json.sleepTimer, "Off") }}',
+          icon: 'mdi:timer-outline'
+        }
+      },
+      {
+        type: 'switch', id: 'on_timer',
+        payload: powerTimerPayload(topic, 'on', 'On Timer', 'mdi:alarm')
+      },
+      {
+        type: 'switch', id: 'off_timer',
+        payload: powerTimerPayload(topic, 'off', 'Off Timer', 'mdi:alarm-off')
+      },
+      {
+        type: 'switch', id: 'standby_light',
+        payload: {
+          name: 'Standby LED',
+          command_topic: topic.command('standbyLight'),
+          state_topic: topic.telemetry,
+          value_template: '{{ "ON" if value_json.lights and value_json.lights.standby else "OFF" }}',
+          payload_on: 'on',
+          payload_off: 'off',
+          state_on: 'ON',
+          state_off: 'OFF',
+          icon: 'mdi:led-on'
+        }
+      },
+      {
+        type: 'switch', id: 'logo_light',
+        payload: {
+          name: 'Logo Light',
+          command_topic: topic.command('logoLight'),
+          state_topic: topic.telemetry,
+          value_template: '{{ "ON" if value_json.lights and value_json.lights.logo else "OFF" }}',
+          payload_on: 'on',
+          payload_off: 'off',
+          state_on: 'ON',
+          state_off: 'OFF',
+          icon: 'mdi:television-ambient-light'
+        }
+      },
+      {
+        type: 'button', id: 'screensaver',
+        payload: {
+          name: 'Start Screensaver',
+          command_topic: topic.command('screensaver'),
+          payload_press: 'press',
+          icon: 'mdi:television-shimmer'
+        }
+      },
+      {
+        /*
+         * The other half of that button. turnOnScreenSaver reports success
+         * whether or not anything answered the request, so this is the only
+         * confirmation that one is actually on screen.
+         */
+        type: 'binary_sensor', id: 'screen_saver_active',
+        payload: {
+          name: 'Screen Saver',
+          state_topic: topic.telemetry,
+          value_template: '{{ "ON" if value_json.screenSaver else "OFF" }}',
+          icon: 'mdi:television-shimmer'
+        }
+      },
+      {
+        type: 'select', id: 'screensaver_mode',
+        payload: {
+          name: 'Screen Saver',
+          command_topic: topic.command('screensaverMode'),
+          state_topic: topic.telemetry,
+          options: SS_IDS.map(function (k) { return SS[k].label; }),
+          command_template: '{{ ' + JSON.stringify(ssMap(true)) + '[value] }}',
+          value_template: '{{ ' + JSON.stringify(ssMap(false)) + '.get(value_json.screensaverMode, "LG default") }}',
+          icon: 'mdi:television-shimmer'
+        }
+      },
+      {
+        type: 'switch', id: 'ad_blocker',
+        payload: {
+          name: 'Ad & Telemetry Blocker',
+          command_topic: topic.command('adblock'),
+          state_topic: topic.telemetry,
+          value_template: '{{ "ON" if value_json.privacy and value_json.privacy.adblock and value_json.privacy.adblock.enabled else "OFF" }}',
+          // On is the ads & telemetry tier. Everything also blocks the app
+          // store and software updates, which a switch cannot warn about, so
+          // it is chosen on a dashboard, where it is confirmed. The state
+          // stays ON for either tier.
+          payload_on: 'ads',
+          payload_off: 'off',
+          state_on: 'ON',
+          state_off: 'OFF',
+          icon: 'mdi:shield-check'
+        }
+      },
+      // A step at a time, as the remote's volume keys: a receiver on HDMI
+      // ARC/eARC that takes no set level still takes these.
+      {
+        type: 'button', id: 'volume_up',
+        payload: {
+          name: 'Volume Up',
+          command_topic: topic.command('volumeStep'),
+          payload_press: '1',
+          icon: 'mdi:volume-plus',
+          availability: volumeStepAvailability
+        }
+      },
+      {
+        type: 'button', id: 'volume_down',
+        payload: {
+          name: 'Volume Down',
+          command_topic: topic.command('volumeStep'),
+          payload_press: '-1',
+          icon: 'mdi:volume-minus',
+          availability: volumeStepAvailability
+        }
+      },
+      // The remote's D-pad, Back and Home, as the dashboard's remote sends them.
+      {
+        type: 'button', id: 'remote_up',
+        payload: {
+          name: 'Remote Up',
+          command_topic: topic.command('rcu'),
+          payload_press: 'up',
+          icon: 'mdi:chevron-up'
+        }
+      },
+      {
+        type: 'button', id: 'remote_down',
+        payload: {
+          name: 'Remote Down',
+          command_topic: topic.command('rcu'),
+          payload_press: 'down',
+          icon: 'mdi:chevron-down'
+        }
+      },
+      {
+        type: 'button', id: 'remote_left',
+        payload: {
+          name: 'Remote Left',
+          command_topic: topic.command('rcu'),
+          payload_press: 'left',
+          icon: 'mdi:chevron-left'
+        }
+      },
+      {
+        type: 'button', id: 'remote_right',
+        payload: {
+          name: 'Remote Right',
+          command_topic: topic.command('rcu'),
+          payload_press: 'right',
+          icon: 'mdi:chevron-right'
+        }
+      },
+      {
+        type: 'button', id: 'remote_ok',
+        payload: {
+          name: 'Remote OK',
+          command_topic: topic.command('rcu'),
+          payload_press: 'ok',
+          icon: 'mdi:circle-medium'
+        }
+      },
+      {
+        type: 'button', id: 'remote_back',
+        payload: {
+          name: 'Remote Back',
+          command_topic: topic.command('rcu'),
+          payload_press: 'back',
+          icon: 'mdi:keyboard-return'
+        }
+      },
+      {
+        type: 'button', id: 'remote_home',
+        payload: {
+          name: 'Remote Home',
+          command_topic: topic.command('rcu'),
+          payload_press: 'home',
+          icon: 'mdi:home'
+        }
+      },
+      {
+        type: 'event', id: 'remote_button',
+        payload: {
+          name: 'Remote Button',
+          state_topic: topic.eventsButton,
+          event_types: ['red', 'green', 'yellow', 'blue'],
+          icon: 'mdi:remote'
+        }
+      },
+      {
+        type: 'button', id: 'play',
+        payload: {
+          name: 'Play',
+          command_topic: topic.command('playback'),
+          payload_press: 'play',
+          icon: 'mdi:play'
+        }
+      },
+      {
+        type: 'button', id: 'pause',
+        payload: {
+          name: 'Pause',
+          command_topic: topic.command('playback'),
+          payload_press: 'pause',
+          icon: 'mdi:pause'
+        }
+      },
+      {
+        type: 'button', id: 'play_pause',
+        payload: {
+          name: 'Play / Pause',
+          command_topic: topic.command('playback'),
+          payload_press: 'playPause',
+          icon: 'mdi:play-pause'
+        }
+      },
+      {
+        type: 'button', id: 'stop',
+        payload: {
+          name: 'Stop',
+          command_topic: topic.command('playback'),
+          payload_press: 'stop',
+          icon: 'mdi:stop'
+        }
+      },
+      {
+        type: 'button', id: 'rewind',
+        payload: {
+          name: 'Rewind',
+          command_topic: topic.command('playback'),
+          payload_press: 'rewind',
+          icon: 'mdi:rewind'
+        }
+      },
+      {
+        type: 'button', id: 'fast_forward',
+        payload: {
+          name: 'Fast Forward',
+          command_topic: topic.command('playback'),
+          payload_press: 'fastForward',
+          icon: 'mdi:fast-forward'
+        }
+      }
+    ];
+
+    var updatePayload = {
+      name: 'Server Update',
+      state_topic: topic.update,
+      icon: 'mdi:package-up'
+    };
+    // Without a command topic Home Assistant shows the release but no Install
+    // button, which is right where the Homebrew Channel does the updating.
+    if (!opts.updatesElsewhere) {
+      updatePayload.command_topic = topic.command('update');
+      updatePayload.payload_install = 'install';
+    }
+    entities.push({ type: 'update', id: 'server_update', payload: updatePayload });
+
+    if (opts.allowPower) {
+      entities.push({
+        type: 'button', id: 'restart',
+        payload: {
+          name: 'Restart TV',
+          command_topic: topic.command('reboot'),
+          device_class: 'restart',
+          icon: 'mdi:restart'
+        }
+      });
+      entities.push({
+        type: 'button', id: 'power_off',
+        payload: {
+          name: 'Power Off TV',
+          command_topic: topic.command('powerOff'),
+          icon: 'mdi:power'
+        }
+      });
+      // Only works while the TV is in Active Standby and still on the
+      // network; in plain standby the bridge is offline with it.
+      entities.push({
+        type: 'button', id: 'power_on',
+        payload: {
+          name: 'Power On TV',
+          command_topic: topic.command('powerOn'),
+          icon: 'mdi:power'
+        }
+      });
+    }
+
+  // PicCap's screen capture, which feeds an ambient light. Only while PicCap
+  // answers: the server publishes its state, and nothing at all without it.
+  if (opts.piccap) {
+    entities.push({
+      type: 'switch', id: 'piccap',
+      payload: {
+        name: 'PicCap Capture',
+        command_topic: topic.command('piccap/power'),
+        state_topic: topic.state('piccap/power'),
+        payload_on: 'ON',
+        payload_off: 'OFF',
+        icon: 'mdi:television-ambient-light'
+      }
+    });
+  }
+
+  entities.push({
+    type: 'binary_sensor', id: 'power',
+    payload: {
+      name: 'Power',
+      state_topic: topic.telemetry,
+      value_template: '{{ "OFF" if value_json.tvOff else "ON" }}',
+      device_class: 'power'
+    }
+  });
+
+  entities = entities.concat(lgSettingEntities(opts.lgRows, topic));
+
+  return withSafeFields(withOffStates(entities));
+}
+
+/*
+ * What each entity shows while the TV is switched off (telemetry's tvOff).
+ * A reading of what is on screen says Off, asleep or not. Live measurements
+ * keep reporting while the TV is off but still up (Always-on, panel
+ * compensation), since the server can still take them, and go unavailable
+ * once it sleeps, when the last one sent would be stale: see AWAKE_ONLY.
+ * Settings and facts that stay true while the TV is off - picture mode,
+ * volume, panel hours, model - keep their last value.
+ */
+var OFF_TEXT = ['active_app', 'play_state', 'sound_format', 'dynamic_range', 'video_signal', 'hdmi_link_mode',
+                'hdmi_chroma', 'hdmi_hdcp', 'video_colorimetry', 'panel_dimming'];
+var OFF_BINARY = ['hdmi_allm', 'hdmi_vrr', 'screen_saver_active', 'oled_asbl_dimmer'];
+var AWAKE_ONLY = {
+  soc_temperature: 1, cpu_load: 1, memory_usage: 1, swap_usage: 1, wifi_signal: 1, gpu_clock: 1,
+  ambient_light: 1, download_rate: 1, upload_rate: 1
+};
+
+// Entities that send commands, which need the server awake to receive them.
+var CONTROL_TYPES = { 'switch': 1, 'select': 1, 'number': 1, 'button': 1, 'text': 1, 'event': 1 };
+
+/*
+ * Whether Home Assistant shows an entity as available, from the status topic:
+ * controls and live readings only while the TV is up, everything else unless
+ * the server itself is gone. An entity with an availability list of its own
+ * (volume and mute, from telemetry's volume_control) gets the status check
+ * added to that list, with both required. Home Assistant rejects a config
+ * that has the list and availability_topic together (#437), and so created
+ * none of those four entities.
+ */
+function withAvailability(item, statusTopic) {
+  var conf = item.payload;
+  var template = CONTROL_TYPES[item.type] || AWAKE_ONLY[item.id]
+    ? "{{ 'online' if value in ['online', 'off'] else 'offline' }}"
+    : "{{ 'offline' if value == 'offline' else 'online' }}";
+  if (Array.isArray(conf.availability)) {
+    // A new list: the entity's own may be shared with others.
+    conf.availability = [{ topic: statusTopic, value_template: template }].concat(conf.availability);
+    conf.availability_mode = 'all';
+    return conf;
+  }
+  conf.availability_topic = statusTopic;
+  conf.availability_template = template;
+  conf.payload_available = 'online';
+  conf.payload_not_available = 'offline';
+  return conf;
+}
+
+/*
+ * Suggests an initial entity_id to Home Assistant's MQTT discovery.
+ * Without default_entity_id, Home Assistant derives new entity IDs from
+ * the user's customized device name and area (e.g. Living Room TV Diagnostics)
+ * rather than devId (e.g. lg_c9).
+ */
+function defaultEntityId(type, devId, itemId) {
+  var devSlug = (devId || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+  return type + '.' + (devSlug ? devSlug + '_' : '') + itemId;
+}
+
+function withOffStates(entities) {
+  var when = {};
+  OFF_TEXT.forEach(function (id) { when[id] = '"Off"'; });
+  OFF_BINARY.forEach(function (id) { when[id] = '"OFF"'; });
+  entities.forEach(function (e) {
+    var t = e.payload && e.payload.value_template;
+    var m = t && when.hasOwnProperty(e.id) && /^\{\{([\s\S]*)\}\}$/.exec(t.trim());
+    if (m) e.payload.value_template = '{{ ' + when[e.id] + ' if value_json.tvOff else (' + m[1].trim() + ') }}';
+  });
+  return entities;
+}
+
+/*
+ * A field the telemetry leaves out, as most are with the TV off or nothing
+ * playing, makes Home Assistant log a "Template variable warning" each time
+ * a template reads it: 45,736 in four hours from four TVs (#761). So every
+ * value_json.a.b in a template is read as (value_json.get('a') or {}).get('b'),
+ * which gives none quietly instead. A segment called like a method, as in
+ * value_json.get('x'), is left as it is.
+ */
+function safeFields(template) {
+  return template.replace(/value_json((?:\.[A-Za-z_][A-Za-z0-9_]*)+)(\s*\()?/g, function (all, chain, call) {
+    var segs = chain.slice(1).split('.');
+    var method = call ? segs.pop() : null;
+    var expr = 'value_json';
+    segs.forEach(function (seg, i) {
+      expr = i === 0 ? expr + ".get('" + seg + "')" : '(' + expr + " or {}).get('" + seg + "')";
+    });
+    return method ? (segs.length ? '(' + expr + ' or {})' : expr) + '.' + method + call : expr;
+  });
+}
+
+function withSafeFields(entities) {
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    for (var k in o) {
+      if (typeof o[k] === 'string' && /template$/.test(k)) o[k] = safeFields(o[k]);
+      else walk(o[k]);
+    }
+  })(entities);
+  return entities;
+}
+
+function filterWithholds(entities, opts) {
+  opts = opts || {};
+  var discPfx = opts.discPfx || 'homeassistant';
+  var devId = opts.devId || 'lg_tv';
+  var publishFn = opts.publishFn;
+  var caps = opts.capabilities || {};
+
+  function withhold(matches) {
+    var kept = [], dropped = 0;
+    for (var w = 0; w < entities.length; w++) {
+      if (matches(entities[w])) {
+        if (publishFn) {
+          publishFn(discPfx + '/' + entities[w].type + '/' + devId + '/' +
+                    entities[w].id + '/config', '', true);
+        }
+        dropped++;
+      } else {
+        kept.push(entities[w]);
+      }
+    }
+    entities = kept;
+    return dropped;
+  }
+
+  function byId() {
+    var set = {}, a;
+    for (a = 0; a < arguments.length; a++) set[arguments[a]] = 1;
+    return function (e) { return set[e.id] === 1; };
+  }
+
+  if (!caps.hasRemoteInfo) withhold(byId('remote_battery'));
+
+  if (!caps.hasPnwash) {
+    withhold(byId('oled_short_cycles', 'oled_refresher_cycles', 'oled_failure_alerts'));
+  }
+
+  if (!caps.hasCell) withhold(byId('oled_cell_type', 'tcon_firmware'));
+
+  if (!caps.hasHdmiProc) {
+    withhold(function (e) { return e.id.indexOf('hdmi_') === 0; });
+  }
+
+  if (!caps.hasMediaState) withhold(byId('play_state'));
+  if (!caps.hasSoundFormat) withhold(byId('sound_format'));
+
+  if (!caps.hasHdrStatus) withhold(byId('video_colorimetry'));
+
+  if (!caps.socArch) withhold(byId('soc_architecture'));
+
+  if (caps.hasLogoLight === false) withhold(byId('logo_light'));
+
+  // Known only once the TV's settings have been read; until then both stay.
+  if (caps.hasOnTimer === false) withhold(byId('on_timer'));
+  if (caps.hasOffTimer === false) withhold(byId('off_timer'));
+
+  if (!caps.thermalPresent) withhold(byId('soc_temperature'));
+
+  if (!caps.emmcWearPresent) withhold(byId('flash_health', 'flash_wear'));
+
+  if (!caps.hasLightSensor) withhold(byId('ambient_light'));
+
+  if (!caps.updateCheck) withhold(byId('server_update'));
+  if (!caps.hasRemoteButtons) withhold(byId('remote_button'));
+
+  var hdmiSeen = caps.hdmiSeen || {};
+  withhold(function (e) {
+    var needs = HDMI_DIAG_ONLY[e.id];
+    return !!needs && !hdmiSeen[needs];
+  });
+
+  if (!caps.hasGpuClock) withhold(byId('gpu_clock'));
+
+  if (!caps.watchHistory) withhold(byId('watch_time_today', 'watch_time_week', 'watch_top_app_today'));
+
+  if (caps.isOled === true) withhold(byId('panel_dimming'));
+
+  if (caps.isOled === false) {
+    var oledWithheld = withhold(function (e) { return OLED_ONLY[e.id] === 1; });
+    if (oledWithheld > 0) {
+      console.log('mqtt: not an OLED panel, withheld ' + oledWithheld + ' panel entities');
+    }
+  }
+
+  var userEnts = caps.userEntities || {};
+  var userWithheld = withhold(function (e) {
+    var cat = entityCategory(e);
+    if (userEnts[cat] === false) return true;
+    var dis = userEnts.disabled;
+    if (dis && (dis.indexOf(e.id) !== -1 || dis.indexOf(e.type + '.' + e.id) !== -1)) return true;
+    return false;
+  });
+  if (userWithheld > 0) {
+    console.log('mqtt: user configuration withheld ' + userWithheld + ' entities');
+  }
+
+  return entities;
+}
+
+module.exports = {
+  LG_SETTING_ENTITIES: LG_SETTING_ENTITIES,
+  AWAKE_ONLY: AWAKE_ONLY,
+  withAvailability: withAvailability,
+  HA_CATEGORIES: HA_CATEGORIES,
+  HA_ENTITIES: HA_ENTITIES,
+  ENTITY_CATEGORIES: ENTITY_CATEGORIES,
+  entityCategory: entityCategory,
+  selectState: selectState,
+  appNames: appNames,
+  RETIRED_ENTITIES: RETIRED_ENTITIES,
+  safeFields: safeFields,
+  HDMI_DIAG_ONLY: HDMI_DIAG_ONLY,
+  OLED_ONLY: OLED_ONLY,
+  clearRetired: clearRetired,
+  buildEntities: buildEntities,
+  filterWithholds: filterWithholds,
+  defaultEntityId: defaultEntityId
+};

@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+dist/
+.venv/
+node_modules/
+server/config.json
+server/config.*.json
+server/home.json
+server/home-weather.json
+server/home-ambient.json
+server/*.log
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+backups/

@@ -1,0 +1,480 @@
+'use strict';
+
+var msg = require('./say').msg;
+var fs = require('fs');
+var path = require('path');
+var readJson = require('./util').readJson;
+var execFile = require('child_process').execFile;
+
+var CATALOG = [
+  {
+    id: 'mycar',
+    bin: 'com.webos.service.mycar',
+    title: msg('srv.service.mycar', 'Car-to-Home Telematics'),
+    unit: 'com.webos.service.mycar.service',
+    upstart: null,
+    badge: msg('srv.service.badge.ram', '{mb} MB RAM', { mb: '2.1' }),
+    desc: msg('srv.service.mycar.desc', 'Hyundai/Kia Bluelink vehicle status listener in Home Dashboard. Unnecessary unless linking a connected vehicle.')
+  },
+  {
+    id: 'camera',
+    bin: 'com.webos.service.camera2',
+    title: msg('srv.service.camera', 'USB Camera Listener'),
+    unit: 'com.webos.service.camera.service',
+    upstart: null,
+    badge: msg('srv.service.badge.ram', '{mb} MB RAM', { mb: '2.5' }),
+    desc: msg('srv.service.camera.desc', 'Background USB webcam detection daemon. Unnecessary unless a USB webcam is physically attached.')
+  },
+  {
+    id: 'uploadd',
+    bin: 'uploadd',
+    title: msg('srv.service.uploadd', 'Telemetry & Diagnostics Uploader'),
+    unit: 'uploadd.service',
+    upstart: 'uploadd',
+    badge: msg('srv.service.badge.telemetry', 'Telemetry'),
+    desc: msg('srv.service.uploadd.desc', 'Uploads crash logs, diagnostic traces, and usage telemetry to LG servers.')
+  },
+  {
+    id: 'rdxd',
+    bin: 'rdxd',
+    title: msg('srv.service.rdxd', 'Remote Diagnostics Daemon'),
+    unit: 'rdxd.service',
+    upstart: 'rdxd',
+    badge: msg('srv.service.badge.flashWrites', 'Flash writes'),
+    desc: msg('srv.service.rdxd.desc', 'Continuously logs diagnostic traces, core dumps, and event data to internal flash memory.')
+  },
+  {
+    id: 'crashreportd',
+    bin: 'crashreportd',
+    title: msg('srv.service.crashreportd', 'Jira Crash Reporter'),
+    unit: null,
+    upstart: 'crashreportd',
+    badge: msg('srv.service.badge.telemetry', 'Telemetry'),
+    desc: msg('srv.service.crashreportd.desc', 'Background daemon on older webOS versions that generates automated crash reports.')
+  },
+  {
+    id: 'contentminer',
+    bin: 'contentminer',
+    title: msg('srv.service.contentminer', 'ACR Content Miner'),
+    unit: 'contentminer.service',
+    upstart: null,
+    badge: msg('srv.service.badge.ram', '{mb} MB RAM', { mb: '4.2' }),
+    desc: msg('srv.service.contentminer.desc', 'Scans and indexes on-screen audio/video content for advertising and viewing habit telemetry.')
+  },
+  {
+    id: 'nudge',
+    bin: 'nudge',
+    title: msg('srv.service.nudge', 'LG Promotions & Tips Popups'),
+    unit: 'nudge.service',
+    upstart: null,
+    badge: msg('srv.service.badge.ram', '{mb} MB RAM', { mb: '3.1' }),
+    desc: msg('srv.service.nudge.desc', 'Pushes marketing notifications, promotional popups, and feature tips to the TV interface.')
+  },
+  {
+    id: 'remotelogger',
+    bin: 'remotelogger',
+    title: msg('srv.service.remotelogger', 'Remote Logging Daemon'),
+    unit: 'remotelogger.service',
+    upstart: 'remotelogger',
+    badge: msg('srv.service.badge.ram', '{mb} MB RAM', { mb: '1.7' }),
+    desc: msg('srv.service.remotelogger.desc', 'Ships system log messages to remote servers.')
+  },
+  /*
+   * LG's voice assistant: the AI button, voice search and the microphone. Not
+   * listed with the others: Remote keys switches it off while the AI button is
+   * set, as with it running LG's voice screen opens over the app chosen (a C5,
+   * webOS 11.2.0), and back on once the button is LG's again.
+   */
+  {
+    id: 'voiceconductor',
+    bin: 'voiceconductor',
+    title: msg('srv.service.voiceconductor', 'LG Voice Assistant'),
+    unit: 'voiceconductor.service',
+    upstart: null,
+    badge: '',
+    desc: msg('srv.service.voiceconductor.desc', 'LG\'s voice assistant: the AI button, voice search and the microphone.'),
+    hidden: true
+  }
+];
+
+/*
+ * Once on the list, now never to be switched off; init() switches them back on
+ * for anyone who had. tvdataexchanger left the video plane muted after power
+ * on (docs/IMPLEMENTATION.md). Without alwaysready, Plex showed video stretched
+ * vertically on an OLED65C4PUA (webOS 10.3.1, firmware 33.31.68) until the
+ * service was back and the TV rebooted; Always Ready itself is switched off
+ * under Advanced.
+ */
+var RETIRED = ['tvdataexchanger', 'alwaysready'];
+
+var stateDir = '/var/lib/tvweb';
+var disabledFilePath = null;
+// run-parts skips any name containing a character outside a-zA-Z0-9-_, so the
+// hook must not end in .sh. It once did, and never ran.
+var initScriptPath = '/var/lib/webosbrew/init.d/20-tvweb-services';
+var oldInitScriptPath = '/var/lib/webosbrew/init.d/20-services.sh';
+var transientDir = '/run/systemd/transient';
+
+// The processes running, by program name, from each one's executable.
+function runningPrograms() {
+  var out = {}, pids = [];
+  try { pids = fs.readdirSync('/proc'); } catch (e) { return out; }
+  for (var i = 0; i < pids.length; i++) {
+    if (!/^\d+$/.test(pids[i])) continue;
+    try {
+      var name = path.basename(fs.readlinkSync('/proc/' + pids[i] + '/exe'));
+      (out[name] = out[name] || []).push(parseInt(pids[i], 10));
+    } catch (e2) {}
+  }
+  return out;
+}
+
+/*
+ * Stops any switched-off service found running. The boot hook stops them
+ * once, but on webOS 9 the service hub launches some on demand whenever
+ * something asks for them, outside the unit: uploadd was seen running 22s into
+ * a C2's boot, before the hook got to it. The unit or job is stopped first, so
+ * nothing supervising it starts it again; anything left is then signalled
+ * directly, which is how one the hub launched ends.
+ */
+function enforce() {
+  var disabled = readDisabledList();
+  if (!disabled.length) return;
+  var procs = runningPrograms(), systemctl = getSystemctl(), initctl = getInitctl();
+  CATALOG.forEach(function (item) {
+    var pids = item.bin && procs[item.bin];
+    if (!pids || disabled.indexOf(item.id) === -1) return;
+    console.log('services: ' + item.id + ' was running while switched off, stopping it');
+    if (systemctl && item.unit) execFile(systemctl, ['stop', item.unit], function () {});
+    if (initctl && item.upstart) execFile(initctl, ['stop', item.upstart], function () {});
+    setTimeout(function () {
+      var left = runningPrograms()[item.bin] || [];
+      left.forEach(function (pid) { try { process.kill(pid, 'SIGTERM'); } catch (e) {} });
+    }, 3000);
+  });
+}
+
+function startEnforcing() {
+  setTimeout(enforce, 30000);
+  setInterval(enforce, 5 * 60000);
+}
+
+function getSystemctl() {
+  if (fs.existsSync('/bin/systemctl')) return '/bin/systemctl';
+  if (fs.existsSync('/usr/bin/systemctl')) return '/usr/bin/systemctl';
+  return null;
+}
+
+function getInitctl() {
+  if (fs.existsSync('/sbin/initctl')) return '/sbin/initctl';
+  if (fs.existsSync('/usr/sbin/initctl')) return '/usr/sbin/initctl';
+  return null;
+}
+
+function getDisabledFile() {
+  if (!disabledFilePath) {
+    disabledFilePath = path.join(stateDir, 'disabled_services.json');
+  }
+  return disabledFilePath;
+}
+
+function readDisabledList() {
+  var list = readJson(getDisabledFile(), null);
+  return Array.isArray(list) ? list : [];
+}
+
+function writeDisabledList(list) {
+  try {
+    if (!fs.existsSync(stateDir)) {
+      fs.mkdirSync(stateDir, 493); // 0755
+    }
+    fs.writeFileSync(getDisabledFile(), JSON.stringify(list, null, 2), 'utf8');
+  } catch (e) {}
+
+  syncBootScript(list);
+}
+
+function syncBootScript(disabledList) {
+  var initDir = path.dirname(initScriptPath);
+  if (!fs.existsSync(initDir)) return;
+
+  if (!disabledList || !disabledList.length) {
+    try {
+      if (fs.existsSync(initScriptPath)) fs.unlinkSync(initScriptPath);
+    } catch (e) {}
+    return;
+  }
+
+  var lines = [
+    '#!/bin/sh',
+    '# tvweb managed disabled services',
+    'if which systemctl >/dev/null 2>&1; then',
+    '  mkdir -p /run/systemd/transient'
+  ];
+
+  var upstartJobs = [];
+  for (var i = 0; i < CATALOG.length; i++) {
+    var item = CATALOG[i];
+    if (disabledList.indexOf(item.id) !== -1) {
+      if (item.unit) {
+        lines.push('  ln -sf /dev/null "/run/systemd/transient/' + item.unit + '"');
+        lines.push('  systemctl stop "' + item.unit + '" 2>/dev/null');
+      }
+      if (item.upstart) {
+        upstartJobs.push(item.upstart);
+      }
+    }
+  }
+  lines.push('  systemctl daemon-reload 2>/dev/null');
+
+  if (upstartJobs.length) {
+    lines.push('elif which initctl >/dev/null 2>&1; then');
+    for (var j = 0; j < upstartJobs.length; j++) {
+      lines.push('  initctl stop "' + upstartJobs[j] + '" 2>/dev/null');
+    }
+  }
+  lines.push('fi');
+  lines.push('');
+
+  try {
+    fs.writeFileSync(initScriptPath, lines.join('\n'), { mode: 493 }); // 0755
+  } catch (e) {}
+}
+
+function serviceExists(item, systemctl, initctl) {
+  if (systemctl && item.unit) {
+    if (fs.existsSync('/etc/systemd/system/' + item.unit) ||
+        fs.existsSync('/lib/systemd/system/' + item.unit) ||
+        fs.existsSync('/usr/lib/systemd/system/' + item.unit)) {
+      return true;
+    }
+  }
+  if (initctl && item.upstart) {
+    if (fs.existsSync('/etc/init/' + item.upstart + '.conf')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function init(options) {
+  if (options && options.stateDir) {
+    stateDir = options.stateDir;
+    disabledFilePath = path.join(stateDir, 'disabled_services.json');
+  }
+
+  var disabled = readDisabledList();
+  var kept = disabled.filter(function (id) { return RETIRED.indexOf(id) === -1; });
+  if (kept.length !== disabled.length) {
+    disabled = kept;
+    writeDisabledList(disabled);
+  }
+  try {
+    if (fs.existsSync(oldInitScriptPath)) {
+      fs.unlinkSync(oldInitScriptPath);
+      syncBootScript(disabled);
+    }
+  } catch (e) {}
+
+  var systemctl = getSystemctl();
+
+  if (systemctl) {
+    try {
+      if (!fs.existsSync(transientDir)) {
+        fs.mkdirSync(transientDir, 493);
+      }
+      var reloaded = false, unmasked = [];
+
+      // Unmask the retired units, which an earlier version may have masked
+      for (var d = 0; d < RETIRED.length; d++) {
+        var depMask = path.join(transientDir, RETIRED[d] + '.service');
+        if (fs.existsSync(depMask)) {
+          try {
+            fs.unlinkSync(depMask);
+            unmasked.push(RETIRED[d] + '.service');
+            reloaded = true;
+          } catch (e) {}
+        }
+      }
+
+      for (var i = 0; i < CATALOG.length; i++) {
+        var item = CATALOG[i];
+        if (item.unit && disabled.indexOf(item.id) !== -1) {
+          var maskFile = path.join(transientDir, item.unit);
+          if (!fs.existsSync(maskFile)) {
+            try {
+              fs.symlinkSync('/dev/null', maskFile);
+              reloaded = true;
+            } catch (e) {}
+          }
+        }
+      }
+      if (reloaded) {
+        execFile(systemctl, ['daemon-reload'], function () {
+          if (unmasked.length) execFile(systemctl, ['start'].concat(unmasked), function () {});
+        });
+      }
+    } catch (e) {}
+  }
+}
+
+function getServices(cb) {
+  var systemctl = getSystemctl();
+  var initctl = getInitctl();
+
+  if (!systemctl && !initctl) {
+    return cb({ ok: true, supported: false, services: [] });
+  }
+
+  var disabledList = readDisabledList();
+  var available = [];
+
+  for (var i = 0; i < CATALOG.length; i++) {
+    var item = CATALOG[i];
+    if (!item.hidden && serviceExists(item, systemctl, initctl)) {
+      available.push({
+        id: item.id,
+        title: item.title,
+        badge: item.badge,
+        desc: item.desc,
+        unit: item.unit || item.upstart,
+        disabled: disabledList.indexOf(item.id) !== -1,
+        running: false
+      });
+    }
+  }
+
+  if (!available.length) {
+    return cb({ ok: true, supported: true, services: [] });
+  }
+
+  // Probe running state for available services
+  var procs = runningPrograms();
+  var pending = available.length;
+  function doneOne() {
+    pending--;
+    if (pending <= 0) {
+      cb({ ok: true, supported: true, services: available });
+    }
+  }
+
+  for (var j = 0; j < available.length; j++) {
+    (function (svc) {
+      // Probed even when switched off: the setting says what was asked for,
+      // not what the TV did, and the two differed while the boot hook was
+      // never run.
+      var catItem = null;
+      for (var k = 0; k < CATALOG.length; k++) {
+        if (CATALOG[k].id === svc.id) { catItem = CATALOG[k]; break; }
+      }
+      // The program itself counts as well as the unit or job: on webOS 9 the
+      // service hub launches some of these on demand, outside the unit that
+      // systemd reports on (uploadd, observed 22s into a boot on a C2).
+      var seen = !!(catItem && catItem.bin && procs[catItem.bin]);
+      if (systemctl && catItem && catItem.unit) {
+        execFile(systemctl, ['is-active', catItem.unit], function (err, stdout) {
+          svc.running = seen || (!err && String(stdout).trim() === 'active');
+          doneOne();
+        });
+      } else if (initctl && catItem && catItem.upstart) {
+        execFile(initctl, ['status', catItem.upstart], function (err, stdout) {
+          svc.running = seen || (!err && String(stdout).indexOf('start/running') !== -1);
+          doneOne();
+        });
+      } else {
+        svc.running = seen;
+        doneOne();
+      }
+    })(available[j]);
+  }
+}
+
+function toggleService(id, disabled, cb) {
+  switchService(id, disabled, cb, false);
+}
+
+// For the module that owns a hidden entry: Remote keys and the voice assistant.
+function switchHidden(id, disabled, cb) {
+  switchService(id, disabled, cb, true);
+}
+
+function switchService(id, disabled, cb, hiddenToo) {
+  var catItem = null;
+  for (var i = 0; i < CATALOG.length; i++) {
+    if (CATALOG[i].id === id) { catItem = CATALOG[i]; break; }
+  }
+  if (!catItem || (catItem.hidden && !hiddenToo)) {
+    return cb({ ok: false, error: 'Unknown service ID: ' + id });
+  }
+
+  var systemctl = getSystemctl();
+  var initctl = getInitctl();
+  if (!systemctl && !initctl) {
+    return cb({ ok: false, error: msg('srv.service.unsupported', 'Service management is not supported on this platform') });
+  }
+
+  var list = readDisabledList();
+  var idx = list.indexOf(id);
+
+  if (disabled) {
+    if (idx === -1) list.push(id);
+  } else {
+    if (idx !== -1) list.splice(idx, 1);
+  }
+  writeDisabledList(list);
+
+  if (systemctl && catItem.unit) {
+    var maskFile = path.join(transientDir, catItem.unit);
+    if (disabled) {
+      try {
+        if (!fs.existsSync(transientDir)) fs.mkdirSync(transientDir, 493);
+        if (!fs.existsSync(maskFile)) fs.symlinkSync('/dev/null', maskFile);
+      } catch (e) {}
+      execFile(systemctl, ['daemon-reload'], function () {
+        execFile(systemctl, ['stop', catItem.unit], function () {
+          cb({ ok: true, id: id, disabled: true, running: false });
+        });
+      });
+    } else {
+      try {
+        if (fs.existsSync(maskFile)) fs.unlinkSync(maskFile);
+      } catch (e) {}
+      execFile(systemctl, ['daemon-reload'], function () {
+        execFile(systemctl, ['start', catItem.unit], function () {
+          cb({ ok: true, id: id, disabled: false, running: true });
+        });
+      });
+    }
+  } else if (initctl && catItem.upstart) {
+    var cmd = disabled ? 'stop' : 'start';
+    execFile(initctl, [cmd, catItem.upstart], function () {
+      cb({ ok: true, id: id, disabled: !!disabled, running: !disabled });
+    });
+  } else {
+    cb({ ok: true, id: id, disabled: !!disabled });
+  }
+}
+
+// Whether the TV has this catalog service, so that it can be switched off.
+function available(id) {
+  var systemctl = getSystemctl(), initctl = getInitctl();
+  for (var i = 0; i < CATALOG.length; i++) {
+    if (CATALOG[i].id === id) return serviceExists(CATALOG[i], systemctl, initctl);
+  }
+  return false;
+}
+
+function isDisabled(id) {
+  return readDisabledList().indexOf(id) !== -1;
+}
+
+module.exports = {
+  init: init,
+  CATALOG: CATALOG,
+  getServices: getServices,
+  toggleService: toggleService,
+  switchHidden: switchHidden,
+  isDisabled: isDisabled,
+  available: available,
+  startEnforcing: startEnforcing
+};

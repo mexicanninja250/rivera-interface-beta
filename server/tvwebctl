@@ -1,0 +1,361 @@
+#!/bin/sh
+# tvwebctl - start/stop/restart the tvweb server on the TV, and the watchdog
+# that restarts it if its event loop stops turning.
+#
+# Exists as a script rather than an inline ssh command on purpose: `pkill -f
+# tvweb.js` typed into an ssh command matches the remote shell running that
+# very command (its argv contains the path), so the shell kills itself before
+# starting anything. Inside a script, the shell's argv is just this file.
+#
+# Usage: tvwebctl {start|stop|restart|status|watch|update|rollback|restore-home|restore-keys|restore-glasshouse-home}
+
+# Each can be moved by a TVWEB_ variable of the same name, which only
+# test/test-tvwebctl.js sets: it runs this script against a stand-in server.
+APP=${TVWEB_APP:-/var/lib/tvweb/tvweb.js}
+LOG=${TVWEB_LOG:-/var/lib/tvweb/tvweb.log}
+PIDFILE=${TVWEB_PIDFILE:-/var/run/tvweb.pid}
+WATCHPID=${TVWEB_WATCHPID:-/var/run/tvwebwatch.pid}
+BEAT=${TVWEB_BEAT:-/var/run/tvweb.beat}
+# Restarts are recorded here rather than in $LOG, which is rotated - a
+# watchdog whose evidence is discarded with the next 256k of log is no use.
+RESTARTS=${TVWEB_RESTARTS:-/var/lib/tvweb/tvweb.restarts}
+NODE=${TVWEB_NODE:-/usr/bin/node}
+SELF=$(readlink -f "$0" 2>/dev/null || echo /var/lib/tvweb/tvwebctl)
+
+# Never keep the caller's working directory: if started from a directory that is
+# later deleted (like a temporary deploy path), node's module loader fails on
+# every restart with ENOENT in uv_cwd when process.cwd() no longer resolves.
+cd / || exit 1
+
+# How long the heartbeat may go unwritten before the server is considered
+# wedged. The server writes it every 20s, so this is five missed beats - long
+# enough that a busy TV delaying a timer is never mistaken for a hang.
+STALE=${TVWEB_STALE:-90}
+CHECK=${TVWEB_CHECK:-30}
+
+# In its first minutes a server has less slack: node 0.12 on a B8 (webOS 4) has
+# stalled mid-start, its child frozen between fork and exec and the server
+# waiting on it for good, and boot is when most of those children are started.
+# A shorter limit then brings the TV back in under two minutes rather than two
+# and a half. Measured from the pid file, which every start writes.
+STARTUP=${TVWEB_STARTUP:-300}
+STARTUP_STALE=${TVWEB_STARTUP_STALE:-45}
+
+# Log rotation. /var/lib is flash, and nothing else trims this file: a broker
+# the TV cannot reach, or a chatty automation, appends to it indefinitely.
+# Rotating at 256k keeps at most 512k on disk across the two generations.
+LOG_MAX=262144
+
+app_running() {
+  pid=$(cat "$PIDFILE" 2>/dev/null)
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  # A pid left over from before a reboot may now belong to something else.
+  tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "$APP"
+}
+
+stop_app() {
+  start-stop-daemon -K -q -p "$PIDFILE" 2>/dev/null
+  # Catch instances started before this script existed.
+  # shellcheck disable=SC2009  # busybox pgrep has no -f, so ps is the only way
+  for p in $(ps -eo pid,args 2>/dev/null | grep -E "$APP|remotebuttons" | grep -v grep | awk '{print $1}'); do
+    [ "$p" = "$$" ] && continue
+    kill -9 "$p" 2>/dev/null
+  done
+  rm -f "$PIDFILE" "$BEAT"
+}
+
+start_app() {
+  [ -x "$NODE" ] || { echo "node not found at $NODE"; exit 1; }
+  [ -f "$APP" ]  || { echo "not installed: $APP"; exit 1; }
+  # start-stop-daemon cannot see a running server for itself: it is told to look
+  # for /bin/sh, and the server has exec'd into node. At a cold boot the boot
+  # hook and the Homebrew Channel app can both start it, and a second copy dies
+  # on EADDRINUSE leaving the pid file naming a dead process (#392).
+  if app_running; then echo "already running (pid $(cat "$PIDFILE"))"; return 0; fi
+  chmod 600 /var/lib/tvweb/config.json 2>/dev/null
+  # -b detaches and -m writes the pidfile, so the process survives the ssh
+  # session closing. `setsid ... &` alone does not.
+  # Append rather than truncate. trim_logs() below truncates this file while
+  # the server holds it open, and a descriptor opened without O_APPEND keeps
+  # its own offset: the server would carry on writing past the old end, leaving
+  # a sparse file that still reports the size rotation just reclaimed.
+  start-stop-daemon -S -b -m -p "$PIDFILE" -x /bin/sh -- -c "exec $NODE $APP >>$LOG 2>&1"
+}
+
+# Keep one previous generation and truncate in place. Renaming the live file
+# would not work: the server writes to the descriptor it already holds, so it
+# would follow the file under its new name and the fresh one would stay empty.
+#
+# $RESTARTS is written by this loop rather than by the server, so nothing holds
+# it open and the tail can simply be kept. A crash loop is what fills it.
+trim_logs() {
+  if [ -f "$LOG" ]; then
+    sz=$(wc -c < "$LOG" 2>/dev/null)
+    case "$sz" in
+      ''|*[!0-9]*) ;;
+      *) [ "$sz" -gt "$LOG_MAX" ] && cp "$LOG" "$LOG.1" 2>/dev/null && : > "$LOG" ;;
+    esac
+  fi
+  if [ -f "$RESTARTS" ]; then
+    rsz=$(wc -c < "$RESTARTS" 2>/dev/null)
+    case "$rsz" in
+      ''|*[!0-9]*) ;;
+      *) if [ "$rsz" -gt "$LOG_MAX" ]; then
+           tail -n 200 "$RESTARTS" > "$RESTARTS.tmp" 2>/dev/null &&
+             mv "$RESTARTS.tmp" "$RESTARTS"
+         fi ;;
+    esac
+  fi
+}
+
+# Every watchdog of this install, by command line. Two starts at the same
+# moment can each start one, and the pid file names only the last.
+watch_pids() {
+  # shellcheck disable=SC2009  # busybox pgrep has no -f, so ps is the only way
+  ps -eo pid,args 2>/dev/null | grep "$SELF watch" | grep -v grep | awk '{print $1}'
+}
+
+stop_watch() {
+  start-stop-daemon -K -q -p "$WATCHPID" 2>/dev/null
+  for p in $(watch_pids); do
+    [ "$p" = "$$" ] || kill -9 "$p" 2>/dev/null
+  done
+  rm -f "$WATCHPID"
+}
+
+# A watchdog already running is left as the only one, as start_app does for
+# the server; -o makes the start-stop-daemon side of that exit 0 too.
+start_watch() {
+  [ -n "$(watch_pids)" ] && return 0
+  start-stop-daemon -S -o -b -m -p "$WATCHPID" -x /bin/sh -- -c "exec $SELF watch"
+}
+
+# A child of the server that is still node, rather than the program it was
+# started to run, is stuck between fork and exec. On a B8 (webOS 4, node 0.12)
+# such a child sits on a lock it inherited held, and the server waits on it with
+# its event loop frozen: "heartbeat 149s old" after a resume from standby, the
+# child a copy of tvweb.js in futex_wait_queue_me. The server starts nothing
+# that runs node, so a child still running the server's own binary is one.
+# The binary rather than the name: node 22.15 and later rename the main thread,
+# which the fork inherits, to MainThread (24.21) or node-MainThread. The window
+# is normally microseconds; one still there seconds later is killed, which
+# frees the server, and luna.js runs the call again.
+stuck_children() {
+  node=$(readlink "/proc/$1/exe" 2>/dev/null)
+  [ -n "$node" ] || return
+  for st in /proc/[0-9]*/stat; do
+    read -r cpid _ _ ppid _ < "$st" 2>/dev/null || continue
+    [ "$ppid" = "$1" ] || continue
+    [ "$(readlink "/proc/$cpid/exe" 2>/dev/null)" = "$node" ] || continue
+    cmd=$(tr '\0' ' ' < "/proc/$cpid/cmdline" 2>/dev/null)
+    case "$cmd" in *remotebuttons*) continue ;; esac
+    printf "%s " "$cpid"
+  done
+}
+
+# Where a stuck child is waiting: its system call and the library holding the
+# instruction it stopped at, which names the lock it is stuck on.
+where_stuck() {
+  read -r nr _ _ _ _ _ _ _ pc < "/proc/$1/syscall" 2>/dev/null || return
+  # awk rather than $(( )): busybox sh arithmetic is 32-bit signed here, and
+  # addresses above 0x7fffffff would compare wrongly.
+  lib=$(awk -v pc="$pc" '
+    function hex(s,  i, n) { n = 0; s = tolower(s); sub(/^0x/, "", s)
+      for (i = 1; i <= length(s); i++) n = n * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1
+      return n }
+    BEGIN { p = hex(pc) }
+    { split($1, r, "-"); if (hex(r[1]) <= p && p < hex(r[2])) {
+      printf "%s+0x%x", ($6 == "" ? "anon" : $6), p - hex(r[1]) + hex($3); exit } }
+  ' "/proc/$1/maps" 2>/dev/null)
+  echo "syscall $nr at $pc in ${lib:-?}"
+}
+
+free_stuck_children() {
+  [ -n "$1" ] || return
+  first=$(stuck_children "$1")
+  [ -n "$first" ] || return
+  sleep 3
+  for cpid in $(stuck_children "$1"); do
+    case " $first " in *" $cpid "*)
+      where=$(where_stuck "$cpid")
+      kill -9 "$cpid" 2>/dev/null &&
+        echo "$(date): child $cpid stuck before exec ($where) - killed it" >> "$RESTARTS" ;;
+    esac
+  done
+}
+
+# LG's Home back in its place, where Glasshouse Home has it. home.json is left
+# as it is, so the server takes the place again when it next starts.
+release_home() {
+  [ -x "$NODE" ] || return 0
+  "$NODE" "$(dirname "$SELF")/lib/home-takeover.js" --release >/dev/null 2>&1
+}
+
+# A server restarted this many times in RESTART_WINDOW seconds is not coming
+# back soon: Glasshouse Home's page would wait on black, so LG's Home gets its
+# place back until a server stays up.
+RESTART_LIMIT=${TVWEB_RESTART_LIMIT:-3}
+RESTART_WINDOW=${TVWEB_RESTART_WINDOW:-600}
+restarts_since=0
+restarts=0
+counted_restart() {
+  now=$(date +%s)
+  if [ $(( now - restarts_since )) -gt "$RESTART_WINDOW" ]; then
+    restarts_since=$now
+    restarts=0
+  fi
+  restarts=$(( restarts + 1 ))
+  [ "$restarts" -lt "$RESTART_LIMIT" ] && return
+  # Each restart past the limit too: a server that started has taken it again.
+  [ "$restarts" -eq "$RESTART_LIMIT" ] &&
+    echo "$(date): $restarts restarts in ${RESTART_WINDOW}s - LG's Home given back its place" >> "$RESTARTS"
+  release_home
+}
+
+# The watchdog loop. Runs as its own detached process; restarts only the app,
+# never itself, so a restart cannot orphan the watchdog.
+#
+# A wedged server still holds its port open and still looks alive to `kill -0`,
+# so liveness is judged by the heartbeat file the server rewrites every 20s.
+# An absent heartbeat is deliberately NOT a fault: a server predating the
+# heartbeat, or one still starting up, would otherwise be restarted forever.
+watch_loop() {
+  last=$(date +%s)
+  stale=0
+  while true; do
+    sleep "$CHECK"
+
+    # The watchdog is the only thing running on a schedule, so it keeps the
+    # log trimmed too. Done before the liveness checks: a full filesystem is
+    # one of the things that wedges the server.
+    trim_logs
+
+    #
+    # Standby suspends this loop along with everything else, so on resume the
+    # heartbeat is stale because the whole TV stopped - not because the server
+    # wedged. The tell is that far more time passed than was slept for: a real
+    # wedge is caught inside two checks, because the watchdog itself keeps
+    # running. Give the server one round to write a beat before judging it.
+    #
+    now=$(date +%s)
+    slept=$(( now - last ))
+    last=$now
+    if [ "$slept" -gt $(( CHECK * 3 )) ]; then
+      printf '%s [%s] [INFO] watchdog: resumed after %ss suspended - skipping one check\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$(cut -d' ' -f1 /proc/uptime 2>/dev/null || echo 0)" \
+        "$slept" >> "$LOG"
+      stale=0
+      continue
+    fi
+
+    [ -f "$PIDFILE" ] || { stale=0; continue; }       # stopped on purpose
+    free_stuck_children "$(cat "$PIDFILE" 2>/dev/null)"
+    if ! kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+      echo "$(date): process gone - starting" >> "$RESTARTS"
+      counted_restart
+      # A child the server left stuck before exec outlives it, still holding
+      # the port: each new server then died on EADDRINUSE, restarted every
+      # round for ten minutes on a B8. stop_app clears every copy first.
+      stop_app
+      start_app
+      stale=0
+      continue
+    fi
+    beat=$(cat "$BEAT" 2>/dev/null)
+    case "$beat" in ''|*[!0-9]*) stale=0; continue ;; esac   # no usable heartbeat yet
+    age=$(( $(date +%s) - beat ))
+    limit=$STALE
+    up=$(( $(date +%s) - $(date -r "$PIDFILE" +%s 2>/dev/null || echo 0) ))
+    [ "$up" -lt "$STARTUP" ] && limit=$STARTUP_STALE
+    if [ "$age" -le "$limit" ]; then
+      stale=0
+      continue
+    fi
+    #
+    # One stale reading is not enough. Both halves of the resume check are wall
+    # clock - $slept from the stamp taken before the suspend, $age from a second
+    # read a moment later - and the clock steps when the TV comes out of
+    # standby. A step landing between those two reads leaves $slept looking like
+    # a normal round while $age carries the whole suspension, which restarted a
+    # healthy server: "heartbeat 2509s old" at 14:41:07, then "resumed after
+    # 2529s suspended" from the next round, 33s later. Waiting for a second
+    # stale round lets that resume arrive and clear the count. A real wedge
+    # keeps the watchdog running, so it simply reports on the round after.
+    #
+    stale=$(( stale + 1 ))
+    [ "$stale" -lt 2 ] && continue
+    echo "$(date): heartbeat ${age}s old on two checks - event loop wedged, restarting" >> "$RESTARTS"
+    counted_restart
+    stop_app; sleep 1; start_app
+    stale=0
+  done
+}
+
+# Check for a newer release and install it. The work happens in the server
+# itself - one implementation for the dashboard, Home Assistant and this - which
+# is also why this runs a second node process rather than reimplementing it here.
+# Exit 3 from --update means nothing newer was found, so there is nothing to
+# restart for.
+update_app() {
+  [ -x "$NODE" ] || { echo "node not found at $NODE"; exit 1; }
+  [ -f "$APP" ]  || { echo "not installed: $APP"; exit 1; }
+  case "$1" in
+    --check|check) "$NODE" "$APP" --check-update; exit $? ;;
+    --force|-f|force) "$NODE" "$APP" --update --force ;;
+    *) "$NODE" "$APP" --update ;;
+  esac
+  rc=$?
+  [ "$rc" = 3 ] && exit 0
+  [ "$rc" = 0 ] || exit "$rc"
+  stop_watch; stop_app; sleep 1; start_app; start_watch
+  sleep 4
+  "$SELF" status
+}
+
+rollback_app() {
+  [ -x "$NODE" ] || { echo "node not found at $NODE"; exit 1; }
+  [ -f "$APP" ]  || { echo "not installed: $APP"; exit 1; }
+  case "$1" in
+    --force|-f|force) "$NODE" "$APP" --rollback --force || exit $? ;;
+    *) "$NODE" "$APP" --rollback || exit $? ;;
+  esac
+  stop_watch; stop_app; sleep 1; start_app; start_watch
+  sleep 4
+  "$SELF" status
+}
+
+case "$1" in
+  start)   start_app; start_watch ;;
+  # Glasshouse Home's page is only a wait for the server, so a server stopped
+  # on purpose gives LG's Home its place back; its next start takes it again.
+  stop)    stop_watch; stop_app; release_home ;;
+  restart) stop_watch; stop_app; sleep 1; start_app; start_watch ;;
+  watch)   watch_loop ;;
+  update)  update_app "$2" ;;
+  rollback) rollback_app "$2" ;;
+  # Before uninstalling: LG's Home screen layout back, and the input tiles added here off it.
+  restore-home) "$NODE" "$(dirname "$SELF")/lib/homescreen.js" --restore ;;
+  # Before uninstalling: the remote's keys as LG has them.
+  restore-keys) "$NODE" "$(dirname "$SELF")/lib/remotekeys.js" --restore ;;
+  # LG's Home as the TV's Home again, and Glasshouse Home switched off.
+  restore-glasshouse-home) "$NODE" "$(dirname "$SELF")/lib/home.js" --restore ;;
+  status)
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+      echo "running (pid $(cat "$PIDFILE"))"
+    else
+      echo "not running"
+    fi
+    if [ -f "$WATCHPID" ] && kill -0 "$(cat "$WATCHPID")" 2>/dev/null; then
+      beat=$(cat "$BEAT" 2>/dev/null)
+      case "$beat" in
+        ''|*[!0-9]*) echo "watchdog running (pid $(cat "$WATCHPID")), no heartbeat yet" ;;
+        *) echo "watchdog running (pid $(cat "$WATCHPID")), heartbeat $(( $(date +%s) - beat ))s old" ;;
+      esac
+    else
+      echo "watchdog not running"
+    fi
+    [ -s "$RESTARTS" ] && echo "last restart: $(tail -1 "$RESTARTS")" ;;
+  *) echo "usage: $0 {start|stop|restart|status|watch|update [--check|--force]|rollback [--force]|restore-home|restore-keys|restore-glasshouse-home}"; exit 2 ;;
+esac

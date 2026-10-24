@@ -1,0 +1,1263 @@
+/**
+ * apps.js - Application management and tile visibility for webOS.
+ *
+ * Provides:
+ * 1. Hiding non-removable built-in LG system tiles via appinfo.json bind-mounts
+ *    (survives reboots, non-destructive to rootfs, fully reversible).
+ * 2. Uninstalling user/store removable applications via Luna appInstallService.
+ * 3. Enforcing a strict safety denylist of protected system services.
+ *
+ * Strict ES5 for Node 0.12.2 on webOS 4 (LG OLED B8).
+ */
+
+var samrescan = require('./samrescan');
+var msg = require('./say').msg;
+var fs = require('fs');
+var mkdirp = require('./util').mkdirp;
+var readTrimmed = require('./util').readTrimmed;
+var readJson = require('./util').readJson;
+var unlinkQuiet = require('./util').unlinkQuiet;
+var path = require('path');
+var execFile = require('child_process').execFile;
+var screensavers = require('./screensavers');
+var names = require('./names');
+
+var OVERRIDE_DIR = '/var/lib/tvweb/appinfo-overrides';
+var HIDDEN_APPS_FILE = '/var/lib/tvweb/hidden_apps';
+// A saved web page's title as the browser set it, kept on its first rename so
+// clearing the name can put it back.
+var PAGE_TITLES_FILE = '/var/lib/tvweb/saved_page_titles.json';
+var BROWSER_ID = 'com.webos.app.browser';
+var TILE_HIDING_FLAG_FILE = '/var/lib/tvweb/tile_hiding_enabled';
+var TILES_HELD_ERROR = msg('srv.apps.tilesHeld', 'Hiding system apps is turned off on this TV for now. On webOS 10 and later it can leave the picture, the sound and HDMI control off until the TV is unplugged. Apps already hidden come back after the TV is next fully restarted.');
+
+var APP_BASES = [
+  '/media/system/apps/usr/palm/applications',
+  '/usr/palm/applications',
+  '/mnt/otncabi/usr/palm/applications',
+  '/mnt/otycabi/usr/palm/applications'
+];
+
+var PROTECTED_APP_IDS = {
+  'com.tvweb.dashboard': true,
+  'com.tvweb.home': true,
+  'org.webosbrew.hbchannel': true,
+  'com.webos.app.livetv': true,
+  'com.palm.app.settings': true,
+  'com.webos.app.settings': true,
+  'com.webos.app.container': true,
+  'container': true,
+  'com.webos.app.inputcommon': true,
+  'inputcommon': true,
+  'com.webos.app.home': true,
+  'com.webos.app.firstuse': true,
+  'firstuse': true,
+  'com.webos.app.eula': true,
+  'eula': true,
+  'com.webos.app.webapphost': true,
+  'webapphost': true,
+  // Its only tile is a bookmark it re-adds at boot; hiding it adds more.
+  'airplay': true,
+  // Hidden, it never starts: sam accepts the launch and nothing opens, so saved
+  // pages and links in other apps stop working (a C2, webOS 9.2). Other hidden
+  // apps still open.
+  'com.webos.app.browser': true
+};
+
+/*
+ * AirPlay has no tile of its own (its appinfo says visible: false); its tile is
+ * a bookmark that airplay-adaptor adds at boot when it finds none. On the B8
+ * (webOS 4) that check misses the bookmarks already there, and it added one
+ * 39s into a boot with two present, so every boot leaves another. The first is
+ * kept and the rest removed, once at start and again after the adaptor runs.
+ */
+function dedupeAirPlay() {
+  lunaFn('com.webos.applicationManager/listLaunchPoints', {}, function (r) {
+    var extra = ((r && r.launchPoints) || []).filter(function (p) {
+      return p.id === 'airplay' && p.lptype === 'bookmark';
+    }).slice(1);
+    extra.forEach(function (p) {
+      lunaFn('com.webos.applicationManager/removeLaunchPoint', { launchPointId: p.launchPointId }, function () {});
+    });
+    if (extra.length) console.log('apps: removed ' + extra.length + ' duplicate AirPlay tile' +
+                                  (extra.length === 1 ? '' : 's'));
+  });
+}
+
+/*
+ * A TV that hid an app before it was protected still hides it at boot, since
+ * the boot hook reads the hidden list itself. It comes off the list here.
+ * cb(true) when it was on it.
+ */
+function releaseProtected(appId, name, cb) {
+  var lines = [];
+  try { lines = fs.readFileSync(HIDDEN_APPS_FILE, 'utf8').split('\n'); } catch (e) { return cb(false); }
+  if (lines.map(function (l) { return l.trim(); }).indexOf(appId) === -1) return cb(false);
+  try {
+    fs.writeFileSync(HIDDEN_APPS_FILE, lines.filter(function (l) { return l.trim() && l.trim() !== appId; })
+      .map(function (l) { return l.trim() + '\n'; }).join(''));
+    var ovr = path.join(OVERRIDE_DIR, appId + '.json');
+    if (fs.existsSync(ovr)) fs.unlinkSync(ovr);
+  } catch (e2) {
+    console.error('apps: could not take ' + name + ' off the hidden list: ' + e2.message);
+    return cb(false);
+  }
+  console.log('apps: ' + name + ' can no longer be hidden; unhidden');
+  cb(true);
+}
+
+// The browser is shown again now rather than at the next boot, as nothing
+// opens a web page until it is.
+function releaseBrowser() {
+  releaseProtected('com.webos.app.browser', 'the Web Browser', function (was) {
+    if (!was) return;
+    unmountAllForApp('com.webos.app.browser', function () {
+      restartSamShared(function () {}, { 'com.webos.app.browser': true });
+    });
+  });
+}
+
+var lunaFn = null;
+var configObj = null;
+
+function init(opts) {
+  opts = opts || {};
+  lunaFn = opts.luna;
+  configObj = opts.config;
+  if (lunaFn) {
+    releaseProtected('airplay', 'AirPlay', function () {});
+    releaseBrowser();
+    dedupeAirPlay();
+    setTimeout(dedupeAirPlay, 180000);
+  }
+}
+
+function isProtected(id) {
+  if (!id || typeof id !== 'string') return true;
+  if (PROTECTED_APP_IDS[id]) return true;
+  if (names.isHdmiKey(names.shortAppId(id))) return true;
+  if (id.indexOf('com.webos.app.input') === 0) return true;
+  return false;
+}
+
+function readHiddenAppsList() {
+  var map = {};
+  try {
+    if (fs.existsSync(HIDDEN_APPS_FILE)) {
+      var lines = fs.readFileSync(HIDDEN_APPS_FILE, 'utf8').split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var id = lines[i].trim();
+        if (id && !isProtected(id)) {
+          map[id] = true;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('apps: could not read hidden apps file: ' + e.message);
+  }
+  return map;
+}
+
+function writeHiddenAppsList(map) {
+  try {
+    mkdirp(path.dirname(HIDDEN_APPS_FILE));
+    var ids = Object.keys(map).sort();
+    var content = ids.length > 0 ? ids.join('\n') + '\n' : '';
+    fs.writeFileSync(HIDDEN_APPS_FILE, content);
+  } catch (e) {
+    console.error('apps: could not write hidden apps file: ' + e.message);
+  }
+}
+
+function findAllAppinfoPaths(appId) {
+  if (!appId || typeof appId !== 'string') return [];
+  var paths = [];
+  for (var i = 0; i < APP_BASES.length; i++) {
+    var p = path.join(APP_BASES[i], appId, 'appinfo.json');
+    if (fs.existsSync(p)) paths.push(p);
+  }
+  return paths;
+}
+
+function findAppinfoPath(appId) {
+  var paths = findAllAppinfoPaths(appId);
+  return paths.length > 0 ? paths[0] : null;
+}
+
+function findAppDir(appId) {
+  if (!appId || typeof appId !== 'string') return null;
+  for (var i = 0; i < APP_BASES.length; i++) {
+    var d = path.join(APP_BASES[i], appId);
+    if (fs.existsSync(d)) return d;
+  }
+  return null;
+}
+
+function isTileHidingEnabled() {
+  if (fs.existsSync(TILE_HIDING_FLAG_FILE)) return readTrimmed(TILE_HIDING_FLAG_FILE) === '1';
+  // One-time legacy migration: if flag file has not been created yet,
+  // check if an existing hidden_apps file has entries.
+  if (readTrimmed(HIDDEN_APPS_FILE)) {
+    try {
+      mkdirp(path.dirname(TILE_HIDING_FLAG_FILE));
+      fs.writeFileSync(TILE_HIDING_FLAG_FILE, '1\n', 'utf8');
+      return true;
+    } catch (e) {}
+  }
+  return false;
+}
+
+function tileHidingAllowed() {
+  if (configObj && configObj.allowTileHiding === true) return true;
+  if (configObj && configObj.allowTileHiding === false) return false;
+  return isTileHidingEnabled();
+}
+
+// Keeps tile hiding where an upgrade finds it running, so nothing changes for
+// the user. On webOS 10 and later #381 already held it back unless
+// allowOnWebos10 (now allowExperimentalScreensavers) was set, so there it
+// carries over only with that set.
+function migrateConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object') return false;
+  if ('allowTileHiding' in cfg) return false;
+  if (screensavers.slowSwitch() && cfg.allowOnWebos10 !== true && cfg.allowExperimentalScreensavers !== true) return false;
+  if (!isTileHidingEnabled()) return false;
+  cfg.allowTileHiding = true;
+  return true;
+}
+
+// { id: visible } for each id, or null for none.
+function visibleAs(ids, visible) {
+  if (!ids.length) return null;
+  var map = {};
+  ids.forEach(function (id) { map[id] = visible; });
+  return map;
+}
+
+function setTileHidingEnabled(enabled, cb) {
+  if (!configObj || !configObj.allowControl) {
+    if (cb) cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+    return;
+  }
+  enabled = !!enabled;
+  if (enabled && !tileHidingAllowed()) {
+    if (cb) cb({ ok: false, error: TILES_HELD_ERROR });
+    return;
+  }
+  try {
+    mkdirp(path.dirname(TILE_HIDING_FLAG_FILE));
+    fs.writeFileSync(TILE_HIDING_FLAG_FILE, enabled ? '1\n' : '0\n', 'utf8');
+  } catch (e) {}
+  if (!enabled) {
+    var hiddenMap = readHiddenAppsList();
+    var ids = Object.keys(hiddenMap);
+    var i = 0;
+    function unmountNext() {
+      if (i >= ids.length) {
+        return restartSam(function (restarted) {
+          if (cb) cb({ ok: true, tileHidingEnabled: false, samRestarted: restarted });
+        }, visibleAs(ids, true));
+      }
+      var appId = ids[i++];
+      unmountAllForApp(appId, unmountNext);
+    }
+    unmountNext();
+  } else {
+    try {
+      mkdirp(path.dirname(TILE_HIDING_FLAG_FILE));
+      fs.writeFileSync(TILE_HIDING_FLAG_FILE, '1\n', 'utf8');
+    } catch (e) {}
+    var hiddenMap = readHiddenAppsList();
+    var ids = Object.keys(hiddenMap);
+    var i = 0;
+    function remountNext() {
+      if (i >= ids.length) {
+        return restartSam(function (restarted) {
+          if (cb) cb({ ok: true, tileHidingEnabled: true, samRestarted: restarted });
+        }, visibleAs(ids.filter(function (id) {
+          return fs.existsSync(path.join(OVERRIDE_DIR, id + '.json'));
+        }), false));
+      }
+      var appId = ids[i++];
+      var ovr = path.join(OVERRIDE_DIR, appId + '.json');
+      if (fs.existsSync(ovr)) {
+        var tgts = findAllAppinfoPaths(appId);
+        var j = 0;
+        function mountTarget() {
+          if (j >= tgts.length) return remountNext();
+          var tgt = tgts[j++];
+          execFile('/bin/mount', ['--bind', ovr, tgt], { timeout: 4000 }, function () {
+            mountTarget();
+          });
+        }
+        mountTarget();
+      } else {
+        remountNext();
+      }
+    }
+    remountNext();
+  }
+}
+
+/**
+ * Platform-aware fast SAM restart with active foreground app preservation.
+ * On systemd sets (C2, webOS 9), LunaExecutable (AirPlay) ignores SIGTERM and hangs
+ * systemctl restart for 90s. Killing LunaExecutable + systemctl kill -s 9 terminates
+ * the cgroup immediately, triggering systemd on-failure restart in <1s.
+ * On Upstart sets (B8, webOS 4), initctl or pkill -9 triggers upstart respawn in ~1s.
+ * If a non-home app (like an active HDMI port or Live TV) was in the foreground,
+ * it is automatically relaunched so the user is never stranded on the Home screen.
+ */
+/*
+ * sam answers while it is still loading the home screen's tiles, and a list
+ * read then is short: straight after a hide, a C2's Apps tab showed "5 hidden
+ * of 5 apps", then "4 hidden of 9". So a restart counts as done only once the
+ * launch points read the same three times running, half a second apart, or
+ * after 12s. It also keeps a run of hides from stacking restarts on a sam
+ * still starting.
+ */
+// sam and every unit that requires it, as systemctl lists them on the TV.
+var SAM_UNITS = 'sam.service $(systemctl list-dependencies --reverse --plain --no-legend sam.service 2>/dev/null | ' +
+                'sed -n "s/^[^A-Za-z0-9]*\\([A-Za-z0-9@._-]*\\.service\\)$/\\1/p")';
+
+/*
+ * Once sam is back, a unit that requires it and was still refused - its own
+ * restart limit hit before the counters were cleared - is started again, so
+ * the TV is never left without its inputs. On Upstart TVs (webOS 4), Upstart
+ * does not restart dependent jobs when sam restarts, so eim (the input manager)
+ * is restarted here to restore its connection to sam.
+ */
+function startFailedDependents(cb) {
+  var cmd = 'if command -v systemctl >/dev/null 2>&1; then ' +
+            'for u in ' + SAM_UNITS + '; do ' +
+            'if systemctl is-failed --quiet "$u"; then ' +
+            'echo "$u"; systemctl reset-failed "$u"; systemctl start --no-block "$u"; ' +
+            'fi; done; ' +
+            'elif command -v initctl >/dev/null 2>&1; then ' +
+            'initctl restart eim >/dev/null 2>&1 && echo "eim" || true; ' +
+            'fi';
+  execFile('/bin/sh', ['-c', cmd], { timeout: 6000 }, function (err, out) {
+    var started = String(out || '').trim();
+    if (started) console.log('apps: started again after sam restarted: ' + started.split(/\s+/).join(', '));
+    cb();
+  });
+}
+
+var SAM_SETTLE_POLL_MS = 500;
+var SAM_SETTLE_POLLS = 24;
+
+function waitForSam(cb) {
+  if (!lunaFn) return cb();
+  var polls = 0, last = null, same = 0;
+  (function poll() {
+    polls++;
+    lunaFn('com.webos.applicationManager/listLaunchPoints', {}, function (r) {
+      var lps = r && r.returnValue !== false && (r.launchPoints || r.apps);
+      var sig = Array.isArray(lps) && lps.length
+        ? lps.map(function (a) { return a.launchPointId || a.id; }).sort().join(',') : null;
+      same = sig && sig === last ? same + 1 : 0;
+      last = sig;
+      if (same >= 2 || polls >= SAM_SETTLE_POLLS) return cb();
+      setTimeout(poll, SAM_SETTLE_POLL_MS);
+    });
+  })();
+}
+
+/*
+ * Hides and unhides each need sam restarted. Several in quick succession share
+ * one: those that ask while a restart is running wait for a single next one,
+ * and all are answered when it is done. Hiding six tiles on a C2 otherwise ran
+ * six restarts back to back, and the Apps tab reloaded between them.
+ */
+var samRestartRunning = false;
+// Each waiting caller as { cb, expect }; see restartSam.
+var samRestartWaiting = [];
+var samRestartedThisRun = false;
+var FROM_HBC_FILE = '/var/lib/tvweb/.from-homebrew-channel';
+
+/*
+ * Once sam has been restarted, the home launcher stops taking in new launch
+ * points: on a B8 (webOS 4.4.3) an app installed afterwards was in
+ * listLaunchPoints but not on the ribbon until sam was restarted again. The
+ * boot hook restarts sam when tile hiding is on with apps hidden (except on a
+ * Homebrew Channel install), and the server does on each hide and unhide.
+ */
+function launcherNeedsRestart() {
+  if (samRestartedThisRun) return true;
+  if (fs.existsSync(FROM_HBC_FILE)) return false;
+  return isTileHidingEnabled() && Object.keys(readHiddenAppsList()).length > 0;
+}
+
+/** After an install or uninstall: restarts sam if the launcher would otherwise miss the change. cb(restarted). */
+function refreshLauncher(cb) {
+  cb = cb || function () {};
+  if (!launcherNeedsRestart() || !tileHidingAllowed()) return cb(false);
+  console.log('apps: refreshing sam so the home screen updates');
+  restartSamShared(cb);
+}
+
+function restartSamShared(cb, expect) {
+  samRestartWaiting.push({ cb: cb, expect: expect });
+  if (samRestartRunning) return;
+  samRestartRunning = true;
+  (function run() {
+    var batch = samRestartWaiting.splice(0, samRestartWaiting.length);
+    var merged = null;
+    batch.forEach(function (w) {
+      if (!w.expect) return;
+      merged = merged || {};
+      for (var id in w.expect) merged[id] = w.expect[id];
+    });
+    restartSam(function (restarted) {
+      batch.forEach(function (w) { if (w.cb) w.cb(restarted); });
+      if (samRestartWaiting.length) return run();
+      samRestartRunning = false;
+    }, merged);
+  })();
+}
+
+/*
+ * done(true) once sam reports each app's visibility as expect has it
+ * ({ appId: visible }). An app with no visible key is visible.
+ */
+function visibilityCheck(expect) {
+  var ids = Object.keys(expect);
+  return function (done) {
+    var i = 0;
+    (function next() {
+      if (i >= ids.length) return done(true);
+      var id = ids[i++];
+      lunaFn('com.webos.applicationManager/getAppInfo', { id: id }, function (r) {
+        var info = r && r.appInfo;
+        if (!info) return done(false);
+        if ((info.visible !== false) !== expect[id]) return done(false);
+        next();
+      });
+    })();
+  };
+}
+
+/*
+ * Makes sam read the apps again: a nudge where the TV has one (lib/samrescan,
+ * #366), checked against expect, and otherwise a restart. cb(true) once sam
+ * has them.
+ */
+function restartSam(cb, expect) {
+  // Where tile hiding is not allowed, turning it off still unmounts the overrides
+  // and the tiles come back at the next full restart.
+  if (!tileHidingAllowed()) {
+    console.log('apps: sam not restarted - tile hiding is disabled in configuration (#366)');
+    if (cb) cb(false);
+    return;
+  }
+  if (lunaFn) {
+    return samrescan.refresh(expect ? visibilityCheck(expect) : null, function (reread) {
+      if (!reread) return restartSamNow(cb);
+      console.log('apps: sam read the apps again, without a restart');
+      waitForSam(function () { if (cb) cb(true); });
+    });
+  }
+  restartSamNow(cb);
+}
+
+function restartSamNow(cb) {
+  function executeRestart(savedAppId) {
+    /*
+     * systemd rate-limits on-failure restarts - StartLimitBurst=5 inside
+     * StartLimitIntervalSec=10s on webOS 5 and webOS 9 TVs. Hiding a run of
+     * tiles restarts sam once each, so from the sixth restart on systemd refuses
+     * and leaves the unit failed: no home screen, and the next launch lands on
+     * the last input. Clearing the counter first makes each kill look like the
+     * first. The units that require sam restart with it and have the same
+     * limit - on a C2, eim (the inputs), homelaunchpoints and criu - so theirs
+     * are cleared too: a quick run of hides left eim failed and the TV with no
+     * HDMI inputs until it was started by hand.
+     */
+    var cmd = 'if command -v systemctl >/dev/null 2>&1; then ' +
+              'systemctl reset-failed ' + SAM_UNITS + ' >/dev/null 2>&1 || true; ' +
+              'killall -9 LunaExecutable >/dev/null 2>&1 || true; ' +
+              'systemctl kill -s 9 sam.service >/dev/null 2>&1 || systemctl restart --no-block sam >/dev/null 2>&1 || true; ' +
+              'elif command -v initctl >/dev/null 2>&1; then ' +
+              'initctl restart sam >/dev/null 2>&1 || pkill -9 -x sam >/dev/null 2>&1 || true; ' +
+              'else ' +
+              'pkill -9 -x sam >/dev/null 2>&1 || true; ' +
+              'fi';
+    samRestartedThisRun = true;
+    execFile('/bin/sh', ['-c', cmd], { timeout: 6000 }, function (err) {
+      if (err) console.error('apps: restartSam error: ' + err.message);
+      waitForSam(function () { startFailedDependents(function () { restoreApp(err); }); });
+    });
+
+    function restoreApp(err) {
+      if (savedAppId && savedAppId !== 'com.webos.app.home' && savedAppId !== 'com.webos.app.screensaver' && lunaFn) {
+        var attempts = 0;
+        function tryRestore() {
+          attempts++;
+          lunaFn('com.webos.applicationManager/getForegroundAppInfo', {}, function (resp) {
+            if (resp && resp.returnValue) {
+              lunaFn('com.webos.applicationManager/launch', { id: savedAppId }, function () {
+                if (cb) cb(!err);
+              });
+            } else if (attempts < 10) {
+              setTimeout(tryRestore, 200);
+            } else {
+              if (cb) cb(!err);
+            }
+          });
+        }
+        setTimeout(tryRestore, 300);
+      } else {
+        if (cb) cb(!err);
+      }
+    }
+  }
+
+  if (lunaFn) {
+    lunaFn('com.webos.applicationManager/getForegroundAppInfo', {}, function (fg) {
+      var savedAppId = (fg && fg.returnValue && fg.appId) ? fg.appId : null;
+      executeRestart(savedAppId);
+    });
+  } else {
+    executeRestart(null);
+  }
+}
+
+function isMounted(filePath, cb) {
+  execFile('/bin/mount', [], { timeout: 4000 }, function (err, stdout) {
+    if (err) return cb(false);
+    var pat = ' ' + filePath + ' ';
+    cb(String(stdout || '').indexOf(pat) !== -1);
+  });
+}
+
+function umountFile(filePath, cb) {
+  execFile('/bin/umount', ['-l', filePath], { timeout: 4000 }, function () {
+    if (cb) cb();
+  });
+}
+
+function unmountAllForApp(appId, cb) {
+  var tgts = findAllAppinfoPaths(appId);
+  var i = 0;
+  var next = function () {
+    if (i >= tgts.length) {
+      if (cb) cb();
+      return;
+    }
+    var tgt = tgts[i++];
+    var appDir = path.dirname(tgt);
+    umountFile(tgt, function () {
+      umountFile(appDir, function () {
+        umountFile(tgt, function () {
+          next();
+        });
+      });
+    });
+  };
+  next();
+}
+
+/**
+ * Resolves an icon file path on disk for an app.
+ */
+function getIconPath(appId, cb) {
+  if (!appId || typeof appId !== 'string') return cb(null);
+
+  // Check developer or cryptofs apps first
+  var devAppPath = path.join('/media/developer/apps/usr/palm/applications', appId);
+  var cryptoAppPath = path.join('/media/cryptofs/apps/usr/palm/applications', appId);
+  var appDir = null;
+
+  if (fs.existsSync(devAppPath)) appDir = devAppPath;
+  else if (fs.existsSync(cryptoAppPath)) appDir = cryptoAppPath;
+  else appDir = findAppDir(appId);
+
+  if (!appDir) return cb(null);
+
+  var appinfoPath = path.join(appDir, 'appinfo.json');
+  fs.readFile(appinfoPath, 'utf8', function (err, raw) {
+    if (err || !raw) return cb(null);
+    try {
+      var info = JSON.parse(raw);
+      var iconRel = info.largeIcon || info.icon || 'icon.png';
+      // Strip leading $ if present (Enact convention)
+      if (iconRel.charAt(0) === '$') iconRel = iconRel.slice(1);
+      var basePath = info.sysAssetsBasePath ? path.join(appDir, info.sysAssetsBasePath) : appDir;
+      var candidates = [
+        path.join(basePath, iconRel),
+        path.join(basePath, 'hd1080', iconRel),
+        path.join(basePath, 'hd720', iconRel),
+        path.join(appDir, iconRel),
+        path.join(appDir, 'hd1080', iconRel),
+        path.join(appDir, 'icon.png'),
+        path.join(appDir, 'assets', 'icon.png')
+      ];
+      return cb(firstFileInside(appDir, candidates));
+    } catch (e) {}
+    cb(null);
+  });
+}
+
+/*
+ * The first of the paths that is a file inside dir once symlinks are
+ * followed, or null. The icon's path comes from the app's own appinfo.json,
+ * and the icons are served unauthenticated to the LAN with iconServer on, so
+ * an "icon" of "../../../var/lib/tvweb/config.json" must not be read.
+ */
+function firstFileInside(dir, paths) {
+  var root;
+  try { root = fs.realpathSync(dir); } catch (e) { return null; }
+  for (var i = 0; i < paths.length; i++) {
+    try {
+      var real = fs.realpathSync(paths[i]);
+      if (real.indexOf(root + path.sep) === 0 && fs.statSync(real).isFile()) return real;
+    } catch (e) {}
+  }
+  return null;
+}
+
+var dirSizeCache = {};
+var DIR_SIZE_CACHE_MS = 60000;
+
+function dirSize(dir, depth) {
+  if (!dir || typeof dir !== 'string') return 0;
+  var now = Date.now();
+  if (depth === undefined) {
+    if (dirSizeCache[dir] && (now - dirSizeCache[dir].time < DIR_SIZE_CACHE_MS)) {
+      return dirSizeCache[dir].size;
+    }
+    depth = 0;
+  }
+  if (depth > 8) return 0;
+  var total = 0;
+  try {
+    var entries = fs.readdirSync(dir);
+    for (var i = 0; i < entries.length; i++) {
+      var p = path.join(dir, entries[i]);
+      try {
+        var stat = fs.lstatSync(p);
+        if (stat.isDirectory()) {
+          total += dirSize(p, depth + 1);
+        } else if (stat.isFile()) {
+          total += stat.size;
+        }
+      } catch (e1) {}
+    }
+  } catch (e2) {}
+  if (depth === 0) {
+    dirSizeCache[dir] = { size: total, time: now };
+  }
+  return total;
+}
+
+/**
+ * Enumerates all installed removable apps and non-removable built-in system tiles.
+ */
+function getApps(cb) {
+  var hiddenMap = readHiddenAppsList();
+
+  if (!lunaFn) {
+    return cb({
+      ok: false,
+      error: 'luna bus not available',
+      installed: [],
+      systemTiles: [],
+      hiddenCount: Object.keys(hiddenMap).length,
+      writable: false
+    });
+  }
+
+  lunaFn('com.webos.applicationManager/listApps', {}, function (appsRes) {
+    var rawApps = (appsRes && (appsRes.apps || appsRes.launchPoints)) || [];
+
+    lunaFn('com.webos.applicationManager/listLaunchPoints', {}, function (lpRes) {
+      var rawLps = (lpRes && (lpRes.launchPoints || lpRes.apps)) || [];
+
+      var appMap = {};
+      var i, a, id;
+
+      // Index all applications from listApps
+      for (i = 0; i < rawApps.length; i++) {
+        a = rawApps[i];
+        if (a && a.id) {
+          appMap[a.id] = {
+            id: a.id,
+            title: a.title || a.id,
+            version: a.version || '',
+            vendor: a.vendor || '',
+            folderPath: a.folderPath || '',
+            systemApp: !!a.systemApp,
+            removable: !!a.removable,
+            icon: a.largeIcon || a.icon || '',
+            size: (typeof a.appsize === 'number' && a.appsize > 0) ? a.appsize
+                : (typeof a.installedSize === 'number' && a.installedSize > 0) ? a.installedSize
+                : null
+          };
+        }
+      }
+
+      // Merge / supplement with listLaunchPoints
+      var lpMap = {};
+      /** @type {any[]} */
+      var savedPages = [];
+      var originals = readPageTitles();
+      for (i = 0; i < rawLps.length; i++) {
+        a = rawLps[i];
+        /*
+         * A web page saved to the home screen is a bookmark tile of the
+         * browser's. Merged by app id it would rename the browser after the
+         * page and hide every page but one, so each is listed on its own.
+         * Other apps have bookmark tiles too (AirPlay's only tile, an HDMI
+         * input given a name) and stay with their app.
+         */
+        if (a && a.id === BROWSER_ID && a.lptype === 'bookmark') {
+          savedPages.push({
+            launchPointId: a.launchPointId,
+            title: a.title || '',
+            appId: a.id,
+            address: (a.params && (a.params.target || a.params.url)) || '',
+            renamed: originals.hasOwnProperty(a.launchPointId)
+          });
+          continue;
+        }
+        if (a && a.id) {
+          lpMap[a.id] = true;
+          if (!appMap[a.id]) {
+            appMap[a.id] = {
+              id: a.id,
+              title: a.title || a.id,
+              version: a.version || '',
+              vendor: a.vendor || '',
+              folderPath: '',
+              systemApp: !!a.systemApp,
+              removable: a.removable !== false,
+              icon: a.largeIcon || a.icon || ''
+            };
+          } else {
+            if (a.title) appMap[a.id].title = a.title;
+            if (a.icon && !appMap[a.id].icon) appMap[a.id].icon = a.icon;
+            if (a.largeIcon && !appMap[a.id].icon) appMap[a.id].icon = a.largeIcon;
+            if (a.removable !== undefined) appMap[a.id].removable = a.removable;
+            if (a.systemApp !== undefined) appMap[a.id].systemApp = a.systemApp;
+            if (typeof a.appsize === 'number' && a.appsize > 0 && !appMap[a.id].size) {
+              appMap[a.id].size = a.appsize;
+            }
+          }
+        }
+      }
+
+      var installed = [];
+      var systemTiles = [];
+
+      var allIds = Object.keys(appMap);
+      for (i = 0; i < allIds.length; i++) {
+        id = allIds[i];
+        var item = appMap[id];
+        if (isProtected(id)) continue;
+
+        var isDev = item.folderPath.indexOf('/media/developer') === 0;
+        var isCrypto = item.folderPath.indexOf('/media/cryptofs') === 0;
+        var isBuiltIn = item.folderPath.indexOf('/usr/palm') === 0 ||
+                        item.folderPath.indexOf('/mnt/otncabi') === 0 ||
+                        item.folderPath.indexOf('/mnt/otycabi') === 0 ||
+                        item.folderPath.indexOf('/media/system') === 0 ||
+                        (!isDev && !isCrypto && findAppinfoPath(id) !== null);
+
+        if (!isBuiltIn && (item.removable || isDev || isCrypto)) {
+          var size = item.size || null;
+          if (!size && item.folderPath) {
+            var dsz = dirSize(item.folderPath);
+            if (dsz > 0) size = dsz;
+          }
+          // Removable user or store app
+          installed.push({
+            id: item.id,
+            title: item.title,
+            version: item.version,
+            vendor: item.vendor,
+            iconUrl: '/api/apps/icon?id=' + encodeURIComponent(item.id),
+            removable: true,
+            folderPath: item.folderPath,
+            size: size
+          });
+        } else if ((lpMap[item.id] || hiddenMap[item.id]) && (item.systemApp || isBuiltIn)) {
+          // System built-in tile on home screen ribbon (or currently hidden from it)
+          systemTiles.push({
+            id: item.id,
+            title: item.title,
+            iconUrl: '/api/apps/icon?id=' + encodeURIComponent(item.id),
+            hidden: !!hiddenMap[item.id],
+            systemApp: true,
+            removable: false
+          });
+        }
+      }
+
+      // Ensure any app recorded in hiddenMap is present in systemTiles even if SAM omitted it
+      var hiddenKeys = Object.keys(hiddenMap);
+      for (i = 0; i < hiddenKeys.length; i++) {
+        var hid = hiddenKeys[i];
+        var found = false;
+        for (var j = 0; j < systemTiles.length; j++) {
+          if (systemTiles[j].id === hid) { found = true; break; }
+        }
+        if (!found && !isProtected(hid)) {
+          var appinfoFile = findAppinfoPath(hid);
+          var title = hid;
+          if (appinfoFile) {
+            try {
+              var parsed = JSON.parse(fs.readFileSync(appinfoFile, 'utf8'));
+              if (parsed.title) title = parsed.title;
+            } catch (e) {}
+          }
+          systemTiles.push({
+            id: hid,
+            title: title,
+            iconUrl: '/api/apps/icon?id=' + encodeURIComponent(hid),
+            hidden: true,
+            systemApp: true,
+            removable: false
+          });
+        }
+      }
+
+      installed.sort(function (x, y) { return String(x.title || '').localeCompare(String(y.title || '')); });
+      systemTiles.sort(function (x, y) { return String(x.title || '').localeCompare(String(y.title || '')); });
+
+      // Where sam can be nudged, hidden tiles come back at boot without a sam
+      // restart, so the brief blank screen the restart causes does not happen.
+      samrescan.canNudge(function (nudge) {
+        cb({
+          ok: true,
+          installed: installed,
+          systemTiles: systemTiles,
+          savedPages: savedPages,
+          hiddenCount: Object.keys(hiddenMap).length,
+          tileHidingEnabled: isTileHidingEnabled(),
+          tileHidingNudge: nudge,
+          writable: !!(configObj && configObj.allowControl)
+        });
+      });
+    });
+  });
+}
+
+/**
+ * Hides a built-in system tile by staging visible:false and bind-mounting.
+ */
+function hideTile(appId, cb) {
+  if (!configObj || !configObj.allowControl) {
+    return cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+  }
+  if (!appId || typeof appId !== 'string' || !/^[a-zA-Z0-9_.-]+$/.test(appId)) {
+    return cb({ ok: false, error: 'Invalid app ID format' });
+  }
+  if (isProtected(appId)) {
+    return cb({ ok: false, error: msg('srv.apps.protectedHide', 'Protected core system app cannot be hidden') });
+  }
+  if (!tileHidingAllowed()) return cb({ ok: false, error: TILES_HELD_ERROR });
+
+  var tgts = findAllAppinfoPaths(appId);
+  if (tgts.length === 0) {
+    return cb({ ok: false, error: 'appinfo.json not found for ' + appId });
+  }
+
+  unmountAllForApp(appId, function () {
+    var stock;
+    try {
+      stock = JSON.parse(fs.readFileSync(tgts[0], 'utf8'));
+    } catch (e) {
+      return cb({ ok: false, error: 'Failed to read stock appinfo: ' + e.message });
+    }
+
+    stock.visible = false;
+    mkdirp(OVERRIDE_DIR);
+    var ovr = path.join(OVERRIDE_DIR, appId + '.json');
+    try {
+      fs.writeFileSync(ovr, JSON.stringify(stock, null, 2));
+    } catch (e) {
+      return cb({ ok: false, error: 'Failed to write override appinfo: ' + e.message });
+    }
+
+    var i = 0;
+    var mountErrors = [];
+    var mountNext = function () {
+      if (i >= tgts.length) {
+        if (mountErrors.length === tgts.length) {
+          return cb({ ok: false, error: 'Bind mount failed: ' + mountErrors.join('; ') });
+        }
+
+        var hiddenMap = readHiddenAppsList();
+        hiddenMap[appId] = true;
+        writeHiddenAppsList(hiddenMap);
+        try {
+          mkdirp(path.dirname(TILE_HIDING_FLAG_FILE));
+          fs.writeFileSync(TILE_HIDING_FLAG_FILE, '1\n', 'utf8');
+        } catch (e) {}
+
+        var expect = {};
+        expect[appId] = false;
+        return restartSamShared(function (restarted) {
+          cb({
+            ok: true,
+            id: appId,
+            hidden: true,
+            samRestarted: restarted
+          });
+        }, expect);
+      }
+
+      var tgt = tgts[i++];
+      execFile('/bin/mount', ['--bind', ovr, tgt], { timeout: 4000 }, function (mountErr) {
+        if (mountErr) mountErrors.push(mountErr.message);
+        mountNext();
+      });
+    };
+
+    mountNext();
+  });
+}
+
+/**
+ * Unhides a previously hidden tile by unmounting the override and restarting SAM.
+ */
+function unhideTile(appId, cb) {
+  if (!configObj || !configObj.allowControl) {
+    return cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+  }
+  if (!appId || typeof appId !== 'string' || !/^[a-zA-Z0-9_.-]+$/.test(appId)) {
+    return cb({ ok: false, error: 'Invalid app ID format' });
+  }
+
+  var ovr = path.join(OVERRIDE_DIR, appId + '.json');
+  unmountAllForApp(appId, function () {
+    unlinkQuiet(ovr);
+    var hiddenMap = readHiddenAppsList();
+    delete hiddenMap[appId];
+    writeHiddenAppsList(hiddenMap);
+
+    var expect = {};
+    expect[appId] = true;
+    restartSamShared(function (restarted) {
+      cb({
+        ok: true,
+        id: appId,
+        hidden: false,
+        samRestarted: restarted
+      });
+    }, expect);
+  });
+}
+
+/**
+ * Restores all currently hidden tiles.
+ */
+function unhideAllTiles(cb) {
+  if (!configObj || !configObj.allowControl) {
+    return cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+  }
+
+  var hiddenMap = readHiddenAppsList();
+  var ids = Object.keys(hiddenMap);
+
+  var unmountAllRemaining = function () {
+    if (ids.length === 0) {
+      writeHiddenAppsList({});
+      return restartSam(function (restarted) {
+        cb({ ok: true, restoredCount: Object.keys(hiddenMap).length, samRestarted: restarted });
+      }, visibleAs(Object.keys(hiddenMap), true));
+    }
+
+    var curId = ids.shift();
+    var ovr = path.join(OVERRIDE_DIR, curId + '.json');
+    unmountAllForApp(curId, function () {
+      unlinkQuiet(ovr);
+      unmountAllRemaining();
+    });
+  };
+
+  unmountAllRemaining();
+}
+
+/**
+ * Uninstalls a removable user or store app via Luna appInstallService.
+ */
+function readPageTitles() {
+  return readJson(PAGE_TITLES_FILE, null) || {};
+}
+
+/*
+ * A name the browser could reach: a domain ending in letters (bbc.co.uk), an
+ * IPv4 address (a device on the network) or localhost. "12345" parses as a
+ * host but is none of these.
+ */
+function isWebHost(host) {
+  var h = String(host).toLowerCase();
+  if (h === 'localhost') return true;
+  var ip = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (ip) return ip.slice(1).every(function (n) { return +n <= 255; });
+  return /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(h);
+}
+
+/*
+ * The address a saved page opens, with https:// assumed when none is given.
+ * Only http(s): anything else would be handed to the browser as written, and
+ * the dashboard is reachable by everyone on the network.
+ */
+function pageUrl(address) {
+  var url = String(address || '').trim();
+  if (url && !/^[a-z][a-z0-9+.-]*:/i.test(url)) url = 'https://' + url;
+  var m = /^https?:\/\/([^\/?#:\s]+)(:\d{1,5})?([\/?#][^\s]*)?$/i.exec(url);
+  if (!m || !isWebHost(m[1])) return null;
+  return { url: url, host: m[1].replace(/^www\./i, '') };
+}
+
+var BAD_ADDRESS = 'enter a web address, such as bbc.co.uk';
+
+function findSavedPage(lpId, cb) {
+  lunaFn('com.webos.applicationManager/listLaunchPoints', {}, function (r) {
+    var lps = (r && r.launchPoints) || [];
+    for (var i = 0; i < lps.length; i++) {
+      if (lps[i].launchPointId === lpId && lps[i].lptype === 'bookmark' && lps[i].id === BROWSER_ID) return cb(lps[i]);
+    }
+    cb(null);
+  });
+}
+
+/*
+ * The tile keeps its id and its place on the home screen: updateLaunchPoint
+ * takes a new title and a new address alike. An empty name puts back the title
+ * the browser gave the page. An address left out is kept as it is.
+ */
+function editSavedPage(launchPointId, title, address, cb) {
+  if (!configObj || !configObj.allowControl) {
+    return cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+  }
+  var lpId = String(launchPointId || '');
+  var name = String(title == null ? '' : title).replace(/\s+/g, ' ').trim();
+  if (!lpId) return cb({ ok: false, error: 'missing page' });
+  if (name.length > 60) return cb({ ok: false, error: msg('srv.apps.nameTooLong', 'names are limited to 60 characters') });
+  var target = null;
+  if (address != null && String(address).trim()) {
+    target = pageUrl(address);
+    if (!target) return cb({ ok: false, error: BAD_ADDRESS });
+  }
+
+  findSavedPage(lpId, function (lp) {
+    if (!lp) return cb({ ok: false, error: msg('srv.apps.pageGone', 'that saved page is no longer on the TV') });
+    var originals = readPageTitles();
+    if (!name) {
+      name = originals.hasOwnProperty(lpId) ? originals[lpId] : lp.title;
+      delete originals[lpId];
+    } else if (name !== lp.title && !originals.hasOwnProperty(lpId)) {
+      originals[lpId] = lp.title;
+    }
+    var change = { launchPointId: lpId, title: name };
+    if (target) {
+      var params = {};
+      for (var k in (lp.params || {})) params[k] = lp.params[k];
+      params.target = target.url;
+      change.params = params;
+    }
+    lunaFn('com.webos.applicationManager/updateLaunchPoint', change, function (u) {
+      if (!u || u.returnValue !== true) return cb({ ok: false, error: msg('srv.tvRefused', 'the TV would not change it') });
+      try { fs.writeFileSync(PAGE_TITLES_FILE, JSON.stringify(originals), 'utf8'); } catch (e) {}
+      cb({ ok: true, title: name, address: target ? target.url : undefined });
+    });
+  });
+}
+
+/*
+ * The same tile the browser makes when a page is saved from it.
+ */
+function addSavedPage(address, title, cb) {
+  if (!configObj || !configObj.allowControl) {
+    return cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+  }
+  var target = pageUrl(address);
+  if (!target) return cb({ ok: false, error: BAD_ADDRESS });
+  var name = String(title == null ? '' : title).replace(/\s+/g, ' ').trim() || target.host;
+  if (name.length > 60) return cb({ ok: false, error: msg('srv.apps.nameTooLong', 'names are limited to 60 characters') });
+  lunaFn('com.webos.applicationManager/addLaunchPoint',
+         { id: BROWSER_ID, title: name, params: { target: target.url } }, function (r) {
+    if (!r || r.returnValue !== true) return cb({ ok: false, error: msg('srv.apps.addRefused', 'the TV would not add it') });
+    cb({ ok: true, launchPointId: r.launchPointId, title: name });
+  });
+}
+
+/*
+ * Takes the tile off the home screen, as the TV's own remove does: the browser
+ * and anything else installed are untouched, and no app is opened or closed.
+ */
+function removeSavedPage(launchPointId, cb) {
+  if (!configObj || !configObj.allowControl) {
+    return cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+  }
+  var lpId = String(launchPointId || '');
+  if (!lpId) return cb({ ok: false, error: 'missing page' });
+  findSavedPage(lpId, function (lp) {
+    if (!lp) return cb({ ok: false, error: msg('srv.apps.pageGone', 'that saved page is no longer on the TV') });
+    lunaFn('com.webos.applicationManager/removeLaunchPoint', { launchPointId: lpId }, function (x) {
+      if (!x || x.returnValue !== true) return cb({ ok: false, error: msg('srv.apps.removeRefused', 'the TV would not remove it') });
+      var originals = readPageTitles();
+      if (originals.hasOwnProperty(lpId)) {
+        delete originals[lpId];
+        try { fs.writeFileSync(PAGE_TITLES_FILE, JSON.stringify(originals), 'utf8'); } catch (e) {}
+      }
+      cb({ ok: true });
+    });
+  });
+}
+
+function uninstallApp(appId, cb) {
+  if (!configObj || !configObj.allowControl) {
+    return cb({ ok: false, error: msg('srv.controlsOff.apps', 'Control is disabled in server configuration') });
+  }
+  if (!appId || typeof appId !== 'string' || !/^[a-zA-Z0-9_.-]+$/.test(appId)) {
+    return cb({ ok: false, error: 'Invalid app ID format' });
+  }
+  if (isProtected(appId)) {
+    return cb({ ok: false, error: msg('srv.apps.protectedUninstall', 'Protected core application cannot be uninstalled') });
+  }
+  if (!lunaFn) {
+    return cb({ ok: false, error: 'Luna service not available' });
+  }
+
+  // Close the app and any screensaver overlay before removing its files. The
+  // mount is left alone when it is ours: the app going may not be the one in use.
+  lunaFn('com.webos.applicationManager/closeByAppId', { id: appId }, function () {});
+  if (/screensaver/i.test(appId) && screensavers.detectExternal().active) {
+    lunaFn('com.webos.applicationManager/closeByAppId', { id: 'com.webos.app.screensaver' }, function () {});
+    screensavers.unmountScreensaver();
+  }
+
+  var handleSuccess = function () {
+    // Wait for the app removal to complete asynchronously in SAM / appInstallService
+    var start = Date.now();
+    var poll = function () {
+      lunaFn('com.webos.applicationManager/listApps', {}, function (res) {
+        var apps = (res && res.apps) || [];
+        var stillThere = false;
+        for (var i = 0; i < apps.length; i++) {
+          if (apps[i] && apps[i].id === appId) {
+            stillThere = true;
+            break;
+          }
+        }
+        if (!stillThere || (Date.now() - start) >= 3000) {
+          return refreshLauncher(function () {
+            cb({ ok: true, id: appId });
+          });
+        }
+        setTimeout(poll, 300);
+      });
+    };
+    setTimeout(poll, 300);
+  };
+
+  // Attempt standard removal first
+  lunaFn('com.webos.appInstallService/remove', { id: appId }, function (res) {
+    if (res && res.returnValue) {
+      return handleSuccess();
+    }
+
+    // Fall back to dev/remove if standard removal failed (e.g. sideloaded developer app)
+    lunaFn('com.webos.appInstallService/dev/remove', { id: appId }, function (devRes) {
+      if (devRes && devRes.returnValue) {
+        return handleSuccess();
+      }
+      var errMsg = (devRes && devRes.errorText) || (res && res.errorText) || 'Failed to uninstall app';
+      cb({ ok: false, error: errMsg, id: appId });
+    });
+  });
+}
+
+/*
+ * The TV apps that open the dashboard (the dashboard's own tile and the
+ * Homebrew Channel one) are static pages that cannot read config.json, so each
+ * carries the port as a `var PORT = n; // tvweb:port` line. An update, a
+ * redeploy or a change of "port" leaves that line out of step with the server;
+ * rewriting it at every start puts it right in all three cases.
+ */
+var LAUNCHER_APP_IDS = ['com.tvweb.dashboard', 'io.github.rorygallagher2024.lg-webos-dashboard'];
+var LAUNCHER_APP_ROOT = '/media/developer/apps/usr/palm/applications';
+var LAUNCHER_PORT_LINE = /(var PORT = )\d+(;\s*\/\/ tvweb:port)/;
+
+/** Ensures installed launcher apps declare resolution 1920x1080 so 4K TVs scale the canvas. */
+function syncLauncherAppinfo(root) {
+  var changed = [];
+  root = root || LAUNCHER_APP_ROOT;
+  for (var i = 0; i < LAUNCHER_APP_IDS.length; i++) {
+    var file = path.join(root, LAUNCHER_APP_IDS[i], 'appinfo.json');
+    try {
+      if (!fs.existsSync(file)) continue;
+      var raw = fs.readFileSync(file, 'utf8');
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.resolution !== '1920x1080') {
+        parsed.resolution = '1920x1080';
+        fs.writeFileSync(file, JSON.stringify(parsed, null, 2) + '\n');
+        changed.push(LAUNCHER_APP_IDS[i]);
+        console.log('apps: ' + LAUNCHER_APP_IDS[i] + ' appinfo.json updated with resolution 1920x1080');
+      }
+    } catch (e) {
+      console.error('apps: could not set resolution in ' + file + ': ' + e.message);
+    }
+  }
+  return changed;
+}
+
+/** Returns the ids of the installed launcher pages whose port was changed. */
+function syncLauncherPort(port, root) {
+  root = root || LAUNCHER_APP_ROOT;
+  syncLauncherAppinfo(root);
+  var changed = [];
+  port = parseInt(port, 10);
+  if (!(port >= 1 && port <= 65535)) return changed;
+  for (var i = 0; i < LAUNCHER_APP_IDS.length; i++) {
+    var file = path.join(root, LAUNCHER_APP_IDS[i], 'index.html');
+    try {
+      if (!fs.existsSync(file)) continue;
+      var html = fs.readFileSync(file, 'utf8');
+      var next = html.replace(LAUNCHER_PORT_LINE, '$1' + port + '$2');
+      if (next === html) continue;
+      fs.writeFileSync(file, next);
+      changed.push(LAUNCHER_APP_IDS[i]);
+      console.log('apps: ' + LAUNCHER_APP_IDS[i] + ' now opens the dashboard on port ' + port);
+    } catch (e) {
+      console.error('apps: could not set the port in ' + file + ': ' + e.message);
+    }
+  }
+  return changed;
+}
+
+module.exports = {
+  init: init,
+  syncLauncherPort: syncLauncherPort,
+  syncLauncherAppinfo: syncLauncherAppinfo,
+  firstFileInside: firstFileInside,
+  isProtected: isProtected,
+  getApps: getApps,
+  getIconPath: getIconPath,
+  findAllAppinfoPaths: findAllAppinfoPaths,
+  findAppinfoPath: findAppinfoPath,
+  APP_BASES: APP_BASES,
+  hideTile: hideTile,
+  unhideTile: unhideTile,
+  unhideAllTiles: unhideAllTiles,
+  uninstallApp: uninstallApp,
+  editSavedPage: editSavedPage,
+  removeSavedPage: removeSavedPage,
+  addSavedPage: addSavedPage,
+  isWebHost: isWebHost,
+  restartSam: restartSam,
+  restartSamShared: restartSamShared,
+  refreshLauncher: refreshLauncher,
+  readHiddenAppsList: readHiddenAppsList,
+  writeHiddenAppsList: writeHiddenAppsList,
+  isTileHidingEnabled: isTileHidingEnabled,
+  setTileHidingEnabled: setTileHidingEnabled,
+  tileHidingAllowed: tileHidingAllowed,
+  migrateConfig: migrateConfig,
+  PROTECTED_APP_IDS: PROTECTED_APP_IDS,
+  dirSize: dirSize
+};

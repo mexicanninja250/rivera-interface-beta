@@ -1,0 +1,257 @@
+/* PicCap's Luna and MQTT controls. Strict ES5. */
+var existsQuiet = require('./util').existsQuiet;
+var msg = require('./say').msg;
+var topics = require('./topics');
+var SERVICE = 'org.webosbrew.piccap.service/';
+var APP_DIR = '/media/developer/apps/usr/palm/applications/org.webosbrew.piccap';
+var STATUS_CACHE_MS = 4000;
+var lunaFn = null;
+var available = false;
+var isRunning = null;
+var checkedAt = 0;
+var inFlight = false;
+var waiters = [];
+var forceWaiters = [];
+var mqttClient = null;
+var stateTopic = '';
+var lastPublishedState = null;
+var allowControl = false;
+var pollTimer = null;
+var pollIntervalMs = 30000;
+/** @type {function(boolean): void} */
+var onAvailableChange = function () {};
+// Whether Home Assistant's PicCap Capture entity is wanted at all.
+var wanted = function () { return true; };
+var appInstalled = function () { return installed(); };
+var webosOk = true;
+
+function isInstalled() {
+  return webosOk && appInstalled();
+}
+
+function current() {
+  return { available: available, isRunning: isRunning };
+}
+
+function missingService(response, raw) {
+  var text = String(response && (response.errorText || response.error) || raw || '').toLowerCase();
+  return /unknown method|no such service|service.{0,24}(not found|does not exist|not registered)|method.{0,24}(not found|does not exist)/.test(text);
+}
+
+function flush(callbacks, value) {
+  for (var i = 0; i < callbacks.length; i++) {
+    try { callbacks[i](value); } catch (e) {}
+  }
+}
+
+function requestStatus() {
+  checkedAt = Date.now();
+  lunaFn(SERVICE + 'status', {}, function (response, raw) {
+    var was = available;
+    if (response && response.returnValue !== false && typeof response.isRunning === 'boolean') {
+      available = true;
+      isRunning = response.isRunning;
+    } else if (missingService(response, raw)) {
+      available = false;
+      isRunning = null;
+    }
+    // Home Assistant's switch exists only while PicCap answers.
+    if (available !== was) onAvailableChange(available);
+
+    var callbacks = waiters;
+    waiters = [];
+    var refresh = forceWaiters.length > 0;
+    if (refresh) {
+      waiters = forceWaiters;
+      forceWaiters = [];
+    } else {
+      inFlight = false;
+    }
+    flush(callbacks, current());
+    if (refresh) requestStatus();
+  });
+}
+
+function getStatus(cb, force) {
+  cb = cb || function () {};
+  var now = Date.now();
+  if (inFlight) {
+    (force ? forceWaiters : waiters).push(cb);
+    return;
+  }
+  if (!force && checkedAt && now >= checkedAt && now - checkedAt < STATUS_CACHE_MS) return cb(current());
+
+  inFlight = true;
+  waiters.push(cb);
+  requestStatus();
+}
+
+function setPower(on, cb) {
+  if (typeof on !== 'boolean') return cb({ ok: false, error: 'power must be true or false' });
+  if (!isInstalled()) return cb({ ok: false, available: false, error: msg('srv.piccap.unavailable', 'PicCap is not available') });
+  getStatus(function (state) {
+    if (!state.available) {
+      return cb({ ok: false, available: false, error: msg('srv.piccap.unavailable', 'PicCap is not available') });
+    }
+    lunaFn(SERVICE + (on ? 'start' : 'stop'), {}, function (response) {
+      var ok = !!(response && response.returnValue === true);
+      var error = response && (response.errorText || response.errorCode);
+      setTimeout(function () {
+        getStatus(function (latest) {
+          cb({
+            ok: ok,
+            available: latest.available,
+            isRunning: latest.isRunning,
+            error: ok ? undefined : (error || msg('srv.piccap.refused', 'PicCap refused the request'))
+          });
+        }, true);
+      }, 400);
+    });
+  });
+}
+
+function publishState(state, force) {
+  if (!mqttClient || !mqttClient.connected) return;
+  if (!state || typeof state.available !== 'boolean') state = current();
+  var payload = state.available ? (state.isRunning ? 'ON' : 'OFF') : '';
+  if (!force && payload === lastPublishedState) return;
+  mqttClient.publish(stateTopic, payload, true);
+  lastPublishedState = payload;
+}
+
+function refreshAndPublishState(forcePublish) {
+  if (!isInstalled() || !wanted()) return;
+  getStatus(function (state) {
+    publishState(state, forcePublish === true);
+  }, true);
+}
+
+function getState() {
+  return available && typeof isRunning === 'boolean' ? { isRunning: isRunning } : null;
+}
+
+function attachMqtt(opts) {
+  opts = opts || {};
+  mqttClient = opts.client || null;
+  stateTopic = topics(opts.prefix).state('piccap/power');
+  allowControl = opts.allowControl === true;
+  if (pollTimer) clearInterval(pollTimer);
+  // Poll independently of telemetry, and only while MQTT can receive the state.
+  pollTimer = setInterval(function () {
+    if (!mqttClient || !mqttClient.connected) return;
+    // Each check starts a luna-send: none where PicCap is not installed, or
+    // where its Home Assistant entity is switched off.
+    if (isInstalled() && wanted()) return refreshAndPublishState();
+    if (available) forget();
+  }, pollIntervalMs);
+}
+
+function handleMqttCommand(action, value, cb) {
+  if (action !== 'piccap/power') return false;
+  var power = String(value === undefined || value === null ? '' : value).toUpperCase();
+  if (power !== 'ON' && power !== 'OFF') {
+    console.log('piccap: invalid power command: expected ON or OFF, got ' + power);
+    return true;
+  }
+  if (!allowControl) {
+    var disabled = { ok: false, error: msg('srv.controlsOff', 'controls disabled in config') };
+    console.warn('piccap: power command refused: controls disabled in config');
+    if (cb) cb(disabled);
+    return true;
+  }
+  setPower(power === 'ON', function (result) {
+    publishState(result);
+    if (!result || !result.ok) {
+      console.error('piccap: power command failed: ' + ((result && (result.error || result.errorText)) || 'unknown error'));
+    }
+    if (cb) cb(result);
+  });
+  return true;
+}
+
+// PicCap uninstalled, or its entity switched off: no longer offered.
+function forget() {
+  available = false;
+  isRunning = null;
+  publishState(current(), true);
+  onAvailableChange(false);
+}
+
+// For the dashboard: null where PicCap is not installed, without asking it.
+function status(cb) {
+  if (!isInstalled()) return cb(null);
+  getStatus(function (state) {
+    cb(state.available ? { running: state.isRunning === true } : null);
+  });
+}
+
+function init(opts) {
+  opts = opts || {};
+  lunaFn = opts.luna;
+  if (typeof opts.onAvailableChange === 'function') onAvailableChange = opts.onAvailableChange;
+  if (typeof opts.wanted === 'function') wanted = opts.wanted;
+  if (typeof opts.installed === 'function') appInstalled = opts.installed;
+  if ('webosVersion' in opts) webosOk = supportedWebos(opts.webosVersion);
+  var interval = parseInt(opts.pollIntervalMs, 10);
+  pollIntervalMs = interval >= 1000 && interval <= 600000 ? interval : 30000;
+  return {
+    attachMqtt: attachMqtt,
+    refreshAndPublishState: refreshAndPublishState,
+    getState: getState,
+    handleMqttCommand: handleMqttCommand,
+    status: status,
+    setPower: setPower
+  };
+}
+
+function initNoop() {
+  return {
+    attachMqtt: function () {},
+    refreshAndPublishState: function () {},
+    getState: function () { return null; },
+    handleMqttCommand: function () { return false; },
+    status: function (cb) { cb(null); },
+    setPower: function (on, cb) { cb({ ok: false, error: msg('srv.piccap.unavailable', 'PicCap is not available') }); }
+  };
+}
+
+/*
+ * "piccap": {"enabled": ...} came from when PicCap was opt-in. It is offered
+ * wherever it is installed now, and Home Assistant's PicCap Capture entity is
+ * switched off like any other, so a saved false becomes exactly that and the
+ * key goes. Changes cfg in place; true when the file needs writing.
+ */
+function migrateConfig(cfg) {
+  if (!cfg || !cfg.piccap || typeof cfg.piccap !== 'object' || !('enabled' in cfg.piccap)) return false;
+  if (cfg.piccap.enabled === false) {
+    cfg.mqtt = cfg.mqtt || {};
+    cfg.mqtt.entities = cfg.mqtt.entities || {};
+    var off = Array.isArray(cfg.mqtt.entities.disabled) ? cfg.mqtt.entities.disabled : [];
+    if (off.indexOf('piccap') === -1) off.push('piccap');
+    cfg.mqtt.entities.disabled = off;
+  }
+  delete cfg.piccap.enabled;
+  if (!Object.keys(cfg.piccap).length) delete cfg.piccap;
+  return true;
+}
+
+/* Whether the app is on the TV: a look at its folder, without asking its service. */
+function installed() {
+  return existsQuiet(APP_DIR);
+}
+
+/*
+ * PicCap's capture service is built for webOS 4 and later. Asking it for its
+ * status starts it as root, and on a 55UH600V (webOS 2.2.3) each start took
+ * about a second, after which the bus stalled (getPowerState timed out at
+ * 5.7 s) and the TV reset itself with cpuAbnormal (#746). Below webOS 3 it is
+ * treated as absent and never started. A version that cannot be read is
+ * allowed, as before.
+ */
+function supportedWebos(version) {
+  var major = parseInt(version, 10);
+  return !(major < 3);
+}
+
+module.exports = { init: init, initNoop: initNoop, installed: installed, supportedWebos: supportedWebos,
+  migrateConfig: migrateConfig, APP_DIR: APP_DIR };

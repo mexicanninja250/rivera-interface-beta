@@ -1,0 +1,10 @@
+* text=auto
+*.sh text eol=lf
+*.js text eol=lf
+*.py text eol=lf
+*.html text eol=lf
+*.qml text eol=lf
+server/tvwebctl text eol=lf
+*.png binary
+*.jpg binary
+*.ttf binary

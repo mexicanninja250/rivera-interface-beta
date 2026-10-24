@@ -1,0 +1,652 @@
+// The Control and Advanced tabs: power, volume, backlight, toasts, URLs and the TV's switches.
+
+let errTimer = null;
+function clearErr() {
+  if (errTimer) { clearTimeout(errTimer); errTimer = null; }
+  const e = q('err');
+  if (e) { e.textContent = ''; e.style.display = 'none'; }
+  const offMsg = q('offline-msg');
+  if (offMsg) offMsg.style.display = '';
+  const off = q('offline');
+  const isOffline = q('panels') && q('panels').classList.contains('stale') && (Date.now() - lastOk > 6000);
+  if (off && !isOffline) off.hidden = true;
+}
+
+function showErr(m) {
+  if (errTimer) clearTimeout(errTimer);
+  const off = q('offline'), offMsg = q('offline-msg'), e = q('err');
+  if (offMsg) offMsg.style.display = 'none';
+  if (e) { e.textContent = m; e.style.display = 'inline'; }
+  if (off) off.hidden = false;
+  errTimer = setTimeout(clearErr, 6000);
+}
+
+// An Advanced tab setting: its row shows only once the TV reports a value.
+function advPill(row, id, on) {
+  const r = q('row-' + row), b = q(id);
+  if (r) r.hidden = on === undefined;
+  if (!b || on === undefined) return;
+  updateToggle(b, {
+    cls: on ? 'good' : 'idle',
+    label: on ? t('common.on', 'On') : t('common.off', 'Off'),
+    on: on
+  });
+}
+function flip(id) { const el = q(id); return el && el.dataset.on ? 'off' : 'on'; }
+function toggleLight(which) { sendCommand(which, flip(which === 'standbyLight' ? 'lt_standby' : 'lt_logo')); }
+function toggleQuickBoot() { sendCommand('quickBoot', flip('btn_quickboot')); }
+function toggleLgLogo() { sendCommand('lgLogo', flip('btn_lglogo')); }
+function togglePiccap() { sendCommand('piccap', flip('btn_piccap')); }
+function toggleWol() { sendCommand('wakeOnLan', flip('btn_wol')); }
+function toggleDeviceDetection() { sendCommand('deviceDetection', flip('btn_devdetect')); }
+function toggleAlwaysReady() { sendCommand('alwaysReady', flip('btn_ar')); }
+function toggleAlwaysReadyScreen() { sendCommand('alwaysReadyScreen', flip('btn_ars')); }
+
+function applyOptimistic(action, value) {
+  if (action === 'volume') {
+    const v = Number(value) || 0;
+    setLease('volume', v);
+    if (q('vol-slider')) q('vol-slider').value = v;
+    if (q('vol-fill')) q('vol-fill').style.width = v + '%';
+    if (q('vol') && !muted) q('vol').textContent = v;
+  } else if (action === 'mute') {
+    const m = !!value;
+    setLease('mute', m);
+    muted = m;
+    if (q('mute')) q('mute').classList.toggle('on', m);
+    if (q('vol-wrap')) q('vol-wrap').classList.toggle('muted', m);
+    const curVol = q('vol-slider') ? q('vol-slider').value : '';
+    if (q('vol')) q('vol').textContent = m ? t('ctl.muted', 'MUTED') : curVol;
+  } else if (action === 'sleepTimer') {
+    const st = String(value);
+    setLease('sleepTimer', st);
+    ['off','10','30','60','90','120'].forEach(v => {
+      const b = q('sl_' + v);
+      if (b) b.classList.toggle('on', st === v);
+    });
+    if (q('tl-cur')) {
+      q('tl-cur').textContent = st === 'off' ? t('common.off', 'Off') : t('ctl.sleep.minutes', '{n} min', { n: st });
+    }
+  } else if (action === 'pictureMode') {
+    const pm = String(value);
+    setLease('pictureMode', pm);
+    const box = q('picmodes');
+    if (box) {
+      for (let b of box.querySelectorAll('button')) {
+        const matches = b.id.replace('pm_', '') === pm;
+        b.classList.toggle('on', matches);
+        if (matches && q('picmode-lbl')) q('picmode-lbl').textContent = b.textContent.toUpperCase();
+      }
+    }
+  } else if (action === 'energySaving') {
+    const es = String(value);
+    setLease('energySaving', es);
+    if (q('energy-lbl')) q('energy-lbl').textContent = (ENERGY_STEPS[es] || es || '—').toUpperCase();
+    const esBox = q('energysteps');
+    if (esBox) {
+      for (let b of esBox.querySelectorAll('button')) {
+        b.classList.toggle('on', b.id.replace('es_', '') === es);
+      }
+    }
+  } else if (action === 'soundOutput') {
+    const so = String(value);
+    setLease('soundOutput', so);
+    holdVolumeControls();
+    const soBtns = q('soundouts') ? q('soundouts').querySelectorAll('button') : [];
+    for (let b of soBtns) {
+      if (!b.id.startsWith('so_')) continue;
+      const matches = b.id.replace('so_', '') === so;
+      b.classList.toggle('on', matches);
+      if (matches && q('soundout-lbl')) q('soundout-lbl').textContent = b.textContent.toUpperCase();
+    }
+    renderMoreOutputs(moreOutputs, so);
+    const extra = moreOutputs.find(o => o.id === so);
+    if (extra && q('soundout-lbl')) q('soundout-lbl').textContent = extra.name.toUpperCase();
+  } else if (action === 'input') {
+    const inp = String(value);
+    setLease('input', inp);
+    const inBtns = q('inputs') ? q('inputs').querySelectorAll('button') : [];
+    for (let b of inBtns) {
+      const matches = b.id === 'in_' + inp;
+      b.classList.toggle('on', matches);
+      if (matches && q('currapp-lbl')) q('currapp-lbl').textContent = b.textContent.toUpperCase();
+    }
+  } else if (action === 'launchApp') {
+    const appId = String(value);
+    setLease('input', appId);
+    const inBtns = q('inputs') ? q('inputs').querySelectorAll('button') : [];
+    for (let b of inBtns) b.classList.toggle('on', false);
+    const appBtns = q('apps') ? q('apps').querySelectorAll('button') : [];
+    for (let b of appBtns) {
+      const matches = b.id === 'app_' + appId.replace(/[^a-zA-Z0-9_-]/g, '_') || b.id === 'app_com_webos_app_' + appId;
+      b.classList.toggle('on', matches);
+      if (matches && q('currapp-lbl')) q('currapp-lbl').textContent = b.textContent.toUpperCase();
+    }
+  } else if (action === 'quickBoot') {
+    const on = value === 'on' || value === true;
+    setLease('quickBoot', on);
+    advPill('quickboot', 'btn_quickboot', on);
+  } else if (action === 'alwaysReady') {
+    const on = value === 'on' || value === true;
+    setLease('alwaysReady', on);
+    advPill('ar', 'btn_ar', on);
+    arOffRow(on ? lastArOff : undefined);
+  } else if (action === 'alwaysReadyScreen') {
+    const on = value === 'on' || value === true;
+    setLease('alwaysReadyScreen', on);
+    advPill('ars', 'btn_ars', on);
+  } else if (action === 'powerTimer') {
+    const cur = shownPowerTimer(value.timer);
+    if (cur) {
+      setLease('powerTimer.' + value.timer, powerTimerKey(Object.assign({}, cur, value)));
+      powerTimerRows(lastPowerTimers);
+    }
+  } else if (action === 'wakeOnLan') {
+    const on = value === 'on' || value === true;
+    setLease('wakeOnLan', on);
+    advPill('wol', 'btn_wol', on);
+  } else if (action === 'lgLogo') {
+    const on = value === 'on' || value === true;
+    setLease('lgLogo', on);
+    advPill('lglogo', 'btn_lglogo', on);
+  } else if (action === 'piccap') {
+    const on = value === 'on' || value === true;
+    setLease('piccap', on);
+    advPill('piccap', 'btn_piccap', on);
+  } else if (action === 'standbyLight') {
+    const on = value === 'on' || value === true;
+    setLease('standbyLight', on);
+    advPill('standby', 'lt_standby', on);
+  } else if (action === 'logoLight') {
+    const on = value === 'on' || value === true;
+    setLease('logoLight', on);
+    advPill('logolight', 'lt_logo', on);
+  } else if (action === 'deviceDetection') {
+    const on = value === 'on' || value === true;
+    setLease('deviceDetection', on);
+    advPill('devdetect', 'btn_devdetect', on);
+  }
+}
+
+async function sendCommand(action, value) {
+  let triggerBtn = null;
+  if (typeof window !== 'undefined' && window.event && window.event.target && window.event.target.closest) {
+    triggerBtn = window.event.target.closest('button');
+  }
+  if (!triggerBtn && typeof document !== 'undefined' && document.activeElement && document.activeElement.tagName === 'BUTTON') {
+    triggerBtn = document.activeElement;
+  }
+  if (triggerBtn) triggerBtn.classList.add('busy');
+  setBusy(true, 'tx');
+  applyOptimistic(action, value);
+  try {
+    const r = await fetch(api('/api/control'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, value })
+    });
+    setBusy(true, 'rx');
+    const j = await r.json();
+    if (!j.ok) {
+      clearLease(action);
+      showErr(j.error || t('common.actionFailed', 'Action failed'));
+      setTimeout(tick, 0);
+    } else {
+      clearErr();
+    }
+    setTimeout(tick, 320);
+    return j;
+  } catch (e) {
+    clearLease(action);
+    showErr(e.message);
+    setTimeout(tick, 0);
+  } finally {
+    if (triggerBtn) triggerBtn.classList.remove('busy');
+    if (action === 'soundOutput') volSettleUntil = 0;
+    setBusy(false);
+  }
+}
+/* LG's On and Off Timers. Each timer's row shows only where the TV has it.
+   A change is held by a lease until the TV reports it, as the switches are. */
+let lastPowerTimers = null;
+function powerTimerKey(tm) {
+  return JSON.stringify({ enabled: !!tm.enabled, time: tm.time, days: tm.days.slice().sort() });
+}
+function shownPowerTimer(which) {
+  const tm = lastPowerTimers && lastPowerTimers[which];
+  if (!tm) return null;
+  const leased = getLease('powerTimer.' + which, powerTimerKey(tm));
+  return leased !== undefined ? Object.assign({}, tm, JSON.parse(leased)) : tm;
+}
+function powerTimerDayLabels() {
+  return [t('adv.timer.sun', 'Sun'), t('adv.timer.mon', 'Mon'), t('adv.timer.tue', 'Tue'), t('adv.timer.wed', 'Wed'),
+          t('adv.timer.thu', 'Thu'), t('adv.timer.fri', 'Fri'), t('adv.timer.sat', 'Sat')];
+}
+function powerTimerRows(timers) {
+  lastPowerTimers = timers || null;
+  ['on', 'off'].forEach(which => {
+    const row = q('row-' + which + 'timer');
+    if (!row) return;
+    const tm = shownPowerTimer(which);
+    row.hidden = !tm;
+    if (!tm) return;
+    advPill(which + 'timer', 'btn_' + which + 'timer', tm.enabled);
+    const time = q('time_' + which + 'timer');
+    if (time && document.activeElement !== time) time.value = tm.time;
+    const days = q('days_' + which + 'timer');
+    if (days && !days.children.length) {
+      // Monday first, as LG's menu lists them; the value is LG's, Sunday as 0.
+      const labels = powerTimerDayLabels();
+      [1, 2, 3, 4, 5, 6, 0].forEach(d => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = labels[d];
+        b.dataset.day = String(d);
+        b.onclick = () => togglePowerTimerDay(which, d);
+        days.appendChild(b);
+      });
+    }
+    if (days) for (const b of days.children) b.classList.toggle('on', tm.days.indexOf(Number(b.dataset.day)) !== -1);
+  });
+  if (q('adv-timers')) {
+    q('adv-timers').hidden = !shownPowerTimer('on') && !shownPowerTimer('off');
+  }
+  const note = q('ontimer-autooff');
+  if (note) note.hidden = !(timers && timers.on && timers.on.autoOff);
+}
+function setPowerTimer(which, patch) {
+  if (patch.time === '') return;
+  sendCommand('powerTimer', Object.assign({ timer: which }, patch));
+}
+function togglePowerTimer(which) {
+  const tm = shownPowerTimer(which);
+  if (tm) setPowerTimer(which, { enabled: !tm.enabled });
+}
+function togglePowerTimerDay(which, day) {
+  const tm = shownPowerTimer(which);
+  if (!tm) return;
+  const days = tm.days.indexOf(day) === -1 ? tm.days.concat([day]) : tm.days.filter(d => d !== day);
+  setPowerTimer(which, { days: days.sort() });
+}
+
+// Shown only while Always-on is on: with it off, the TV sleeps every night anyway.
+function arOffRow(win) {
+  const row = q('row-aroff'), sel = q('sel_aroff');
+  if (!row || !sel) return;
+  row.hidden = !win;
+  if (!win || document.activeElement === sel) return;
+  const pad = h => String(h).padStart(2, '0') + ':00';
+  if (!sel.options.length) {
+    for (let h = 0; h < 24; h++) sel.add(new Option(pad(h) + ' – ' + pad((h + 5) % 24), String(h)));
+  }
+  const start = parseInt(win.start, 10);
+  // LG's menu can set minutes; show such a window as it is rather than round it.
+  let custom = sel.querySelector('option[data-custom]');
+  if (win.start.slice(3) !== '00') {
+    if (!custom) { custom = new Option('', ''); custom.dataset.custom = '1'; custom.disabled = true; sel.add(custom, 0); }
+    custom.textContent = win.start + ' – ' + win.end;
+    sel.value = '';
+  } else {
+    if (custom) custom.remove();
+    sel.value = String(start);
+  }
+}
+
+/* OLED light, or Backlight on an LCD. Sent once on release, like volume, and
+   held by a lease so the next tick does not snap it back before the TV has
+   taken it. */
+let blDragging = false;
+
+function showBacklight(v) {
+  if (q('bl-slider')) q('bl-slider').value = v;
+  if (q('bl-fill')) q('bl-fill').style.width = v + '%';
+  if (q('bl-lbl')) q('bl-lbl').textContent = v;
+}
+
+function initBacklightSlider() {
+  const wrap = q('bl-wrap');
+  const slider = q('bl-slider');
+  if (!wrap || !slider) return;
+  let active = false;
+  const at = e => {
+    const r = wrap.getBoundingClientRect();
+    return Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)));
+  };
+  const send = async v => {
+    showBacklight(v);
+    setLease('backlight', v);
+    await sendCommand('backlight', v);
+  };
+  const stop = e => {
+    active = false;
+    blDragging = false;
+    wrap.classList.remove('dragging');
+    try { wrap.releasePointerCapture(e.pointerId); } catch (err) {}
+  };
+  wrap.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    active = true;
+    blDragging = true;
+    wrap.classList.add('dragging');
+    try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+    showBacklight(at(e));
+  });
+  wrap.addEventListener('pointermove', e => { if (active) showBacklight(at(e)); });
+  wrap.addEventListener('pointerup', async e => {
+    if (!active) return;
+    stop(e);
+    await send(at(e));
+  });
+  wrap.addEventListener('pointercancel', e => {
+    if (!active) return;
+    stop(e);
+    clearLease('backlight');
+    setTimeout(tick, 0);
+  });
+  slider.addEventListener('keydown', async e => {
+    const steps = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 10, PageDown: -10 };
+    let v;
+    if (steps[e.key]) v = Number(slider.value) + steps[e.key];
+    else if (e.key === 'Home') v = 0;
+    else if (e.key === 'End') v = 100;
+    else return;
+    e.preventDefault();
+    await send(Math.max(0, Math.min(100, v)));
+  });
+}
+
+let volDragging = false;
+let volActive = false;
+// While a sound output change settles: the server answers once the TV has
+// moved the sound over, and until then the volume and mute may be refused.
+// The time limit only covers an answer that never comes.
+let volSettleUntil = 0;
+
+function holdVolumeControls() {
+  volSettleUntil = Date.now() + 10000;
+  if (q('vol-slider')) q('vol-slider').disabled = true;
+  if (q('vol-wrap')) q('vol-wrap').classList.add('off');
+  if (q('mute')) q('mute').disabled = true;
+  if (q('vol-steps')) q('vol-steps').querySelectorAll('button').forEach(b => { b.disabled = true; });
+}
+
+function setVolFromPointer(e) {
+  const wrap = q('vol-wrap');
+  if (!wrap) return 0;
+  const rect = wrap.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(100, Math.round(((e.clientX - rect.left) / rect.width) * 100)));
+  const slider = q('vol-slider');
+  const fill = q('vol-fill');
+  if (slider) slider.value = pct;
+  if (fill) fill.style.width = pct + '%';
+  const volEl = q('vol');
+  if (volEl) volEl.textContent = pct;
+  wrap.classList.remove('muted');
+  muted = false;
+  const muteBtn = q('mute');
+  if (muteBtn) muteBtn.classList.remove('on');
+  return pct;
+}
+
+function initVolSlider() {
+  const wrap = q('vol-wrap');
+  const slider = q('vol-slider');
+  if (!wrap || !slider) return;
+
+  wrap.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || slider.disabled) return;
+    volActive = true;
+    volDragging = true;
+    wrap.classList.add('dragging');
+    try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+    setVolFromPointer(e);
+  });
+
+  wrap.addEventListener('pointermove', e => {
+    if (!volActive) return;
+    setVolFromPointer(e);
+  });
+
+  async function finishVol(e) {
+    if (!volActive) return;
+    volActive = false;
+    wrap.classList.remove('dragging');
+    try { wrap.releasePointerCapture(e.pointerId); } catch (err) {}
+    const val = setVolFromPointer(e);
+    setLease('volume', val);
+    volDragging = false;
+    await sendCommand('volume', val);
+  }
+
+  function cancelVol(e) {
+    if (!volActive) return;
+    volActive = false;
+    volDragging = false;
+    wrap.classList.remove('dragging');
+    try { wrap.releasePointerCapture(e.pointerId); } catch (err) {}
+    clearLease('volume');
+    setTimeout(tick, 0);
+  }
+
+  wrap.addEventListener('pointerup', finishVol);
+  wrap.addEventListener('pointercancel', cancelVol);
+
+  slider.addEventListener('keydown', async e => {
+    let step = 0;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') step = 1;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') step = -1;
+    else if (e.key === 'PageUp') step = 10;
+    else if (e.key === 'PageDown') step = -10;
+    else if (e.key === 'Home') {
+      e.preventDefault();
+      slider.value = 0;
+      if (q('vol-fill')) q('vol-fill').style.width = '0%';
+      if (q('vol')) q('vol').textContent = 0;
+      wrap.classList.remove('muted');
+      muted = false;
+      if (q('mute')) q('mute').classList.remove('on');
+      setLease('volume', 0);
+      await sendCommand('volume', 0);
+      return;
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      slider.value = 100;
+      if (q('vol-fill')) q('vol-fill').style.width = '100%';
+      if (q('vol')) q('vol').textContent = 100;
+      wrap.classList.remove('muted');
+      muted = false;
+      if (q('mute')) q('mute').classList.remove('on');
+      setLease('volume', 100);
+      await sendCommand('volume', 100);
+      return;
+    }
+    if (step !== 0) {
+      e.preventDefault();
+      const current = Number(slider.value) || 0;
+      const next = Math.max(0, Math.min(100, current + step));
+      slider.value = next;
+      if (q('vol-fill')) q('vol-fill').style.width = next + '%';
+      if (q('vol')) q('vol').textContent = next;
+      wrap.classList.remove('muted');
+      muted = false;
+      if (q('mute')) q('mute').classList.remove('on');
+      setLease('volume', next);
+      await sendCommand('volume', next);
+    }
+  });
+}
+initVolSlider();
+initBacklightSlider();
+
+function toggleMute() {
+  muted = !muted;
+  setLease('mute', muted);
+  q('mute').classList.toggle('on', muted);
+  if (q('vol-wrap')) q('vol-wrap').classList.toggle('muted', muted);
+  const s = q('vol-slider');
+  q('vol').textContent = muted ? t('ctl.muted', 'MUTED') : (!s || s.disabled ? '—' : s.value);
+  sendCommand('mute', muted);
+}
+async function sendToast() {
+  const inp = q('toast-input');
+  const msg = inp ? inp.value.trim() : '';
+  if (!msg) return;
+  const btn = q('btn-toast');
+  if (btn) { btn.disabled = true; btn.classList.add('busy'); }
+  try {
+    await sendCommand('toast', msg);
+    if (inp) inp.value = '';
+    const tc = q('toast-count');
+    if (tc) tc.textContent = '0/120';
+    if (btn) {
+      btn.classList.remove('busy');
+      const label = btn.textContent;
+      btn.textContent = t('ctl.toast.sent', 'Sent');
+      btn.classList.add('on');
+      setTimeout(() => {
+        btn.textContent = label;
+        btn.classList.remove('on');
+        btn.disabled = false;
+      }, 1400);
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.classList.remove('busy'); }
+  }
+}
+const toastInp = q('toast-input');
+if (toastInp) {
+  toastInp.addEventListener('input', () => {
+    const el = q('toast-count');
+    if (el) el.textContent = toastInp.value.length + '/120';
+  });
+}
+async function openUrl() {
+  const inp = q('url-input');
+  let url = inp ? inp.value.trim() : '';
+  if (!url) return;
+  // "google.com" is what people type; the TV only takes a full address.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = 'https://' + url;
+  const btn = q('btn-url');
+  if (btn) { btn.disabled = true; btn.classList.add('busy'); }
+  try {
+    const r = await sendCommand('launch_url', url);
+    if (r && r.ok && inp) inp.value = '';
+    if (btn) {
+      btn.classList.remove('busy');
+      const label = btn.textContent;
+      // The browser takes a moment to come up, so say it went rather than
+      // leaving a button that looks like it did nothing.
+      if (r && r.ok) {
+        btn.textContent = t('ctl.openUrl.opened', 'Opened');
+        btn.classList.add('on');
+      }
+      setTimeout(() => {
+        btn.textContent = label;
+        btn.classList.remove('on');
+        btn.disabled = false;
+      }, 1400);
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.classList.remove('busy'); }
+  }
+}
+// True while the TV is in Active Standby: switched off but still up, finishing
+// panel compensation. The power button then turns it back on instead.
+let pwStandby = false;
+
+// installSnap is only set once the Apps tab has polled, so ask the server when
+// it is unknown. An unreachable server counts as no install: the warning must
+// not stand in the way of a reboot.
+async function installRunning() {
+  let s = installSnap;
+  if (!s) {
+    try {
+      const r = await fetch(api('/api/apps/install/status'), { cache: 'no-store' });
+      s = await r.json();
+    } catch (e) { return false; }
+  }
+  return !!(s && INSTALL_BUSY[s.state]);
+}
+
+async function powerAction(a) {
+  if (a === 'powerOn') return sendCommand(a);
+  if (await installRunning() &&
+      !confirm(t('ctl.power.installBusy', 'An app install is in progress. Interrupting it may leave the app half-installed. Continue anyway?'))) return;
+  const msg = a === 'reboot'
+    ? t('ctl.reboot.confirm', 'Reboot the TV now? It will be unavailable for about a minute.')
+    : t('ctl.powerOff.confirm', 'Power off the TV now?');
+  if (confirm(msg)) sendCommand(a);
+}
+
+// Switched off in config.json, the power buttons are not offered at all.
+fetch(api('/api/caps')).then(r => r.json()).then(cp => {
+  if (!cp.allowPower) q('pwset').hidden = true;
+}).catch(() => {});
+
+/*
+ * The remote from a keyboard while the Control tab is open (#831). Left to the
+ * page: keys typed into a field, keys with Ctrl, Alt or Cmd, anything while a
+ * dialog or the menu is open, and Enter or Space on a focused control other
+ * than the D-pad, so the page still works from the keyboard. The open D-pad's
+ * header counts as the D-pad: clicking it to open it leaves it focused, and
+ * Enter would otherwise close it again.
+ */
+const KEYBOARD_REMOTE = {
+  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+  Enter: 'ok', Escape: 'back', Backspace: 'back', h: 'home', m: 'settings'
+};
+let keyboardRemoteAt = 0;
+document.addEventListener('keydown', e => {
+  if (activeTab !== 'control' || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
+  const el = e.target;
+  if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+  if (document.querySelector('.modal-backdrop:not([hidden])') || document.body.classList.contains('nav-open')) return;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const rcu = KEYBOARD_REMOTE[key];
+  if (!rcu && key !== ' ' && key !== 'k') return;
+  const inDpad = el && el.closest && el.closest('#disc-dpad') && q('disc-dpad').open;
+  if ((key === 'Enter' || key === ' ') && el && el !== document.body && !el.dataset.rcu && !inDpad &&
+      el.matches('button, a, summary, [tabindex]')) return;
+  e.preventDefault();
+  // A held key repeats about 30 times a second; the TV is sent at most one in 150 ms.
+  const now = Date.now();
+  if (e.repeat && now - keyboardRemoteAt < 150) return;
+  keyboardRemoteAt = now;
+  if (key === 'k') return toggleMute();
+  if (key === ' ') return sendCommand('media', 'playPause');
+  const btn = document.querySelector('[data-rcu="' + rcu + '"]');
+  if (btn) {
+    btn.classList.add('key-hit');
+    setTimeout(() => btn.classList.remove('key-hit'), 150);
+  }
+  sendCommand('rcu', rcu);
+});
+
+// D-pad disclosure: uncollapse by default on mobile so the TV remote is immediately accessible.
+function updateDpadMobileDefault() {
+  const dpad = q('disc-dpad');
+  if (!dpad) return;
+  let stored = null;
+  try { stored = localStorage.getItem('dpadOpen'); } catch (e) {}
+  if (stored !== null) {
+    dpad.open = stored === '1';
+    return;
+  }
+  const isMobile = (window.matchMedia && (window.matchMedia('(max-width: 820px)').matches || window.matchMedia('(pointer: coarse) and (max-width: 1024px)').matches)) || window.innerWidth < 820;
+  dpad.open = isMobile;
+}
+
+(function initDpad() {
+  const dpad = q('disc-dpad');
+  if (!dpad) return;
+  updateDpadMobileDefault();
+  let userToggled = false;
+  const summary = dpad.querySelector('summary');
+  if (summary) {
+    summary.addEventListener('click', () => { userToggled = true; });
+  }
+  dpad.addEventListener('toggle', () => {
+    if (userToggled) {
+      try { localStorage.setItem('dpadOpen', dpad.open ? '1' : '0'); } catch (e) {}
+    }
+  });
+})();

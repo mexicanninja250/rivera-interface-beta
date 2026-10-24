@@ -1,0 +1,1632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#000000">
+<title>Glasshouse</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="apple-touch-icon" href="/assets/dashboard-app/assets/icon130.png">
+<link rel="stylesheet" href="/assets/ui/ui.css">
+</head>
+<body>
+
+<header>
+  <div class="hdr-left">
+    <div class="mark">
+      <div class="mark-tv"><span id="brand">&mdash;</span><span id="model" class="num">&mdash;</span></div>
+    </div>
+  </div>
+  <div class="src">
+    <div class="st" id="state"><i></i><span>&mdash;</span></div>
+    <div class="t" id="source">&mdash;</div>
+    <div class="stream-info">
+      <div class="stream-primary num" id="stream-primary">&mdash;</div>
+    </div>
+  </div>
+</header>
+
+<div id="offline" role="status" hidden><span id="offline-msg"><b data-t="offline.title">Can’t reach the TV.</b> <span data-t="offline.body">It may be switched off or in standby. This page reconnects by itself when the TV is back.</span></span><span id="err" role="alert" style="display:none"></span></div>
+
+
+
+
+
+
+
+
+
+<!-- The tabs: a sidebar on a wide screen, a drawer behind the menu bar on a narrow one. -->
+<div class="nav-bar">
+  <button type="button" class="nav-toggle" id="nav-toggle" aria-controls="sidenav" aria-expanded="false" onclick="openNav()">
+    <svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    <span class="nav-current" id="nav-current"></span>
+    <span class="sr-only" data-t="nav.open">Open menu</span>
+  </button>
+</div>
+<div class="nav-backdrop" id="nav-backdrop" hidden onclick="closeNav()"></div>
+<aside class="sidenav" id="sidenav" aria-label="Sections" data-t-aria-label="nav.sections">
+  <div class="sidenav-head">
+    <span class="sidenav-brand">
+      <!-- docs/logo/glasshouse.svg without its tile. -->
+      <svg class="mark-logo" viewBox="124 104 264 302" aria-hidden="true">
+        <path d="M358 214 L256 134 L154 214 V342 A34 34 0 0 0 188 376 H324 A34 34 0 0 0 358 342 V286 H272"
+              fill="none" stroke="currentColor" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="sidenav-title" translate="no">Glasshouse</span>
+    </span>
+    <button type="button" class="nav-close" onclick="closeNav()" aria-label="Close menu" data-t-aria-label="nav.close">&times;</button>
+  </div>
+  <button type="button" class="nav-search" id="global-search-open" data-t-aria-label="search.open" aria-label="Search">
+    <svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5"/></svg>
+    <span data-t="search.open">Search</span><kbd>/</kbd>
+  </button>
+  <nav class="tabs" id="tabs" role="tablist" aria-orientation="vertical">
+    <button type="button" role="tab" data-tab="control"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2.5" width="8" height="19" rx="3"/><circle cx="12" cy="8" r="1.6"/><path d="M10.5 13h3M10.5 16h3"/></svg><span data-t="tab.control">Control</span></button>
+    <button type="button" role="tab" data-tab="metrics"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg><span data-t="tab.metrics">Metrics</span></button>
+    <button type="button" role="tab" data-tab="apps"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span data-t="tab.apps">Apps</span></button>
+    <button type="button" role="tab" data-tab="home" id="tab-btn-home" hidden><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6.5 9.5V19h11V9.5"/><path d="M10.5 19v-5h3v5"/></svg><span data-t="tab.home">Home</span></button>
+    <button type="button" role="tab" data-tab="privacy"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6z"/></svg><span data-t="tab.privacy">Privacy</span></button>
+    <button type="button" role="tab" data-tab="oledcare" id="tab-btn-oledcare" hidden><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 8.5v5M9.5 11h5"/></svg><span data-t="tab.oledCare">OLED Care</span></button>
+    <button type="button" role="tab" data-tab="game" id="tab-btn-game" hidden><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10a4 4 0 0 1 4 4v1.5a3 3 0 0 1-5.4 1.8L14.5 14h-5l-1.1 1.3A3 3 0 0 1 3 13.5V12a4 4 0 0 1 4-4z"/><path d="M7.5 11v2.5M6.25 12.25h2.5M16 12h.01"/></svg><span data-t="tab.game">Game</span></button>
+    <button type="button" role="tab" data-tab="screensaver" id="tab-btn-screensaver"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg><span data-t="tab.screensaver">Screensaver</span></button>
+    <div class="nav-rule" role="presentation"></div>
+    <button type="button" role="tab" data-tab="advanced"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span data-t="tab.advanced">Advanced</span></button>
+    <button type="button" role="tab" data-tab="servicemenu" id="tab-btn-servicemenu" hidden><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg><span data-t="tab.serviceMenu">Service menu</span></button>
+    <button type="button" role="tab" data-tab="mqtt"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M8 11l8-4M8 13l8 4"/></svg><span translate="no">MQTT</span></button>
+    <button type="button" role="tab" data-tab="server"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></svg><span data-t="tab.server">Server</span></button>
+    <button type="button" role="tab" data-tab="tools"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15h4"/></svg><span data-t="tab.tools">Tools</span></button>
+  </nav>
+  <div class="sidenav-foot">
+    <div class="nav-rule" role="presentation"></div>
+    <details class="nav-pref" id="nav-pref">
+      <summary class="nav-pref-summary">
+        <svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span data-t="nav.pref">Preferences</span>
+        <svg class="nav-pref-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="nav-pref-body">
+        <div class="nav-pref-grp">
+          <div class="nav-pref-lbl" data-t="server.theme.title">Theme</div>
+          <div class="theme-seg" role="group" aria-label="Theme" data-t-aria-label="theme">
+            <button type="button" data-theme-set="auto" data-t="theme.auto">Auto</button><button type="button"
+              data-theme-set="dark" data-t="theme.dark">Dark</button><button type="button" data-theme-set="light"
+              data-t="theme.light">Light</button>
+          </div>
+        </div>
+        <div class="nav-pref-grp nav-pref-sidebar">
+          <div class="nav-pref-lbl" data-t="server.sidebar.title">Sidebar</div>
+          <div class="theme-seg" role="group" aria-label="Sidebar" data-t-aria-label="server.sidebar.group">
+            <button type="button" data-sidebar-set="show" data-t="server.sidebar.show">Show</button><button type="button"
+              data-sidebar-set="hide" data-t="server.sidebar.hide">Hide</button>
+          </div>
+        </div>
+        <div class="nav-pref-grp">
+          <div class="nav-pref-lbl" data-t="server.language.title">Language</div>
+          <div class="theme-seg" role="group" aria-label="Language" data-t-aria-label="server.language.group">
+            <button type="button" data-lang-set="auto" data-t="theme.auto">Auto</button><button type="button"
+              data-lang-set="en" data-t="lang.en">EN</button><button type="button" data-lang-set="es"
+              data-t="lang.es">ES</button>
+          </div>
+        </div>
+      </div>
+    </details>
+    <div class="nav-shortcuts" id="nav-shortcuts" aria-live="polite"></div>
+    <a class="nav-help" id="nav-help" href="https://rorygallagher2024.github.io/glasshouse/dashboard/" target="_blank" rel="noopener">
+      <svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.6c0 1.7-2.5 2.2-2.5 3.8M12 17h.01"/></svg>
+      <span data-t="nav.help">Help</span>
+      <svg class="nav-ext" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 16L16 8M10 8h6v6"/></svg>
+      <span class="sr-only" data-t="nav.newTab">(opens in a new tab)</span>
+    </a>
+  </div>
+</aside>
+
+<div id="global-search-backdrop" class="global-search-backdrop" hidden>
+  <div class="global-search" id="global-search" role="dialog" aria-modal="true" aria-labelledby="global-search-label">
+    <label class="sr-only" id="global-search-label" for="global-search-input" data-t="search.label">Search settings, sections, apps and controls</label>
+    <div class="global-search-input-wrap">
+      <input id="global-search-input" type="search" autocomplete="off" placeholder="Search settings, sections, apps and controls" data-t-placeholder="search.label" aria-controls="global-search-results" aria-expanded="false">
+      <button type="button" id="global-search-clear" class="global-search-clear" aria-label="Clear search" data-t-aria-label="search.clear" hidden>&times;</button>
+    </div>
+    <div id="global-search-results" class="global-search-results" role="region" aria-label="Search results" data-t-aria-label="search.results" hidden></div>
+  </div>
+</div>
+
+<main id="panels">
+<section class="panel" id="tab-metrics" role="tabpanel" hidden>
+  <div class="col-telemetry">
+    <div class="col-sec" data-t="metrics.system">System</div>
+
+    <div class="grp-sec first" id="tempblock" data-col="0">
+      <div class="grp" data-t="metrics.temperature">Temperature</div>
+      <section class="hero" style="margin-top:0">
+        <div>
+          <div class="lbl" style="margin-bottom:14px" translate="no">SoC</div>
+          <div class="big num none" id="tempbig"><span id="temp">&mdash;</span><span class="deg" id="degsym">&deg;</span></div>
+        </div>
+        <div class="side">
+          <div class="trace" id="trace"></div>
+          <div class="meta num">
+            <span id="trange">&mdash;</span>
+            <span id="mhz">&mdash;</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="grp-sec" data-col="0">
+      <div class="grp" data-t="metrics.system">System</div>
+      <section class="readouts" id="readouts"></section>
+    </div>
+
+    <div class="grp-sec" id="luxblock" data-col="2" hidden>
+      <div class="grp" data-t="metrics.ambient">Ambient</div>
+      <div class="lbl" data-t="metrics.roomLight">Room light</div>
+      <div class="v num" id="lux">&mdash;</div>
+      <div class="sub" data-t="metrics.ambientSensor">Ambient sensor</div>
+    </div>
+
+    <div class="grp-sec" data-col="1">
+      <div class="grp" data-t="metrics.storage">Storage</div>
+      <div id="appstore-cell" hidden>
+        <div class="lbl" data-t="metrics.appSpace">App space</div>
+        <div class="n num" style="margin-top:10px"><span id="appstore">&mdash;</span><em data-t="metrics.gbFree">GB free</em></div>
+        <div class="sub" id="appstore-sub"></div>
+      </div>
+      <div class="flash-row" id="flash-row" hidden
+        title="How much of its life the TV's flash storage estimates it has used, and its own end-of-life warning, which only changes as it nears the end."
+        data-t-title="metrics.flashWear.title">
+        <div>
+          <div class="lbl" data-t="metrics.flashWear">Flash wear</div>
+          <div class="flash-v"><span class="num" id="flash-wear">&mdash;</span><span class="flash-meter" id="flash-meter" aria-hidden="true"></span></div>
+        </div>
+        <div>
+          <div class="lbl" data-t="metrics.flashHealth">Health</div>
+          <div class="flash-v"><span class="pill idle" id="flash-health">&mdash;</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grp-sec" id="remoteblock" data-col="2" hidden>
+      <div class="grp"><span data-t="metrics.remote">Magic remote</span><span class="pill idle" id="remote-pill" data-t="metrics.remote.standby">Standby</span></div>
+      <div id="remote-battery">
+        <div class="lbl" data-t="metrics.battery">Battery</div>
+        <div class="n num" style="margin-top:10px"><span id="remote-pct">&mdash;</span><em>%</em></div>
+        <div class="track" style="margin-top:16px;margin-bottom:14px;max-width:220px"><b id="remote-gauge-fill" style="width:0%"></b></div>
+      </div>
+      <div class="remote-meta" id="remote-meta">
+        <div class="remote-meta-row" id="remote-model-row"><span class="remote-meta-lbl" data-t="metrics.remote.modelLabel">Model:</span> <span class="remote-meta-val" id="remote-model-val"></span></div>
+        <div class="remote-meta-row" id="remote-fw-row"><span class="remote-meta-lbl" data-t="metrics.remote.firmwareLabel">Firmware:</span> <span class="remote-meta-val" id="remote-fw-val"></span></div>
+        <div class="remote-meta-row" id="remote-signal-row"><span class="remote-meta-lbl" data-t="metrics.remote.signalLabel">Signal Strength:</span> <span class="remote-meta-val" id="remote-signal-val"></span></div>
+      </div>
+    </div>
+
+    <div class="grp-sec" id="hdmiblock" data-col="2">
+      <div class="grp"><span translate="no">HDMI</span><span class="cur" id="hdmi-cur"></span></div>
+      <div class="ports" id="hdmi-grid"></div>
+      <div class="sub" id="hdmi-diag-row" hidden style="margin-top:12px;line-height:1.5"></div>
+    </div>
+
+    <div class="grp-sec" id="watchblock" data-col="1" hidden>
+      <div class="grp" data-t="metrics.watch">Watch time</div>
+      <div class="watch-totals">
+        <div><div class="lbl" data-t="metrics.watch.today">Today</div><div class="uptime-val num" id="watch-today">&mdash;</div></div>
+        <div><div class="lbl" data-t="metrics.watch.week">7 days</div><div class="uptime-val num" id="watch-week">&mdash;</div></div>
+        <div><div class="lbl" data-t="metrics.watch.month">30 days</div><div class="uptime-val num" id="watch-month">&mdash;</div></div>
+      </div>
+      <div class="watch-bars" id="watch-bars" role="img" aria-label="Hours watched each day for the last 14 days" data-t-aria-label="metrics.watch.bars"></div>
+      <div id="watch-list"></div>
+      <div class="sub" id="watch-note" hidden></div>
+    </div>
+
+    <div class="grp-sec" id="advblock" data-col="1">
+      <div class="grp" data-t="tab.advanced">Advanced</div>
+      <details class="disc" id="disc-hwinfo" hidden style="border-top:0;margin-top:0">
+      <summary data-t="metrics.systemInfo">System info</summary>
+      <div class="prot-table" id="hw-specs">
+        <div class="prot-row" id="spec-os-item" hidden>
+          <div class="prot-main">
+            <div class="prot-title" translate="no">webOS</div>
+            <div class="prot-desc" data-t="metrics.webos.desc">Operating system release version</div>
+          </div>
+          <div class="prot-status"><span class="pill idle" id="spec-os">&mdash;</span></div>
+        </div>
+        <div class="prot-row" id="spec-fw-item" hidden>
+          <div class="prot-main">
+            <div class="prot-title" data-t="metrics.firmware">Firmware</div>
+            <div class="prot-desc" data-t="metrics.firmware.desc">TV software build version</div>
+          </div>
+          <div class="prot-status"><span class="pill idle" id="spec-fw">&mdash;</span></div>
+        </div>
+        <div class="prot-row" id="spec-arch-item" hidden>
+          <div class="prot-main">
+            <div class="prot-title" data-t="metrics.processor">Processor</div>
+            <div class="prot-desc" data-t="metrics.processor.desc">SoC platform and generation</div>
+          </div>
+          <div class="prot-status"><span class="pill idle" id="spec-arch">&mdash;</span></div>
+        </div>
+        <div class="prot-row" id="spec-silicon-item" hidden>
+          <div class="prot-main">
+            <div class="prot-title" data-t="metrics.oledCell">OLED Cell</div>
+            <div class="prot-desc" data-t="metrics.oledCell.desc">Panel silicon cell identifier</div>
+          </div>
+          <div class="prot-status"><span class="pill idle" id="spec-silicon">&mdash;</span></div>
+        </div>
+        <div class="prot-row" id="spec-tcon-item" hidden>
+          <div class="prot-main">
+            <div class="prot-title" data-t="metrics.tcon">TCON Firmware</div>
+            <div class="prot-desc" data-t="metrics.tcon.desc">Timing controller driving the panel</div>
+          </div>
+          <div class="prot-status"><span class="pill idle" id="spec-tcon">&mdash;</span></div>
+        </div>
+      </div>
+    </details>
+
+
+      <details class="disc" id="disc-proc">
+      <summary><span data-t="metrics.processMemory">Process memory</span> <span class="cur" id="proc-cur"></span></summary>
+      <div id="proc-list"></div>
+    </details>
+
+      <details class="disc" id="disc-cpu">
+      <summary><span data-t="metrics.cpuDetail">Detailed CPU usage</span> <span class="cur" id="cpu-cur"></span></summary>
+      <div id="cpu-list"></div>
+    </details>
+    </div>
+  </div>
+
+</section>
+
+<section class="panel" id="tab-control" role="tabpanel" hidden>
+  <div class="col-controls">
+    <div class="col-sec" data-t="tab.control">Control</div>
+
+    <!-- Panel first: it is the control the remote cannot do easily, and the
+         reason a lot of people install this at all. -->
+    <div class="set" style="margin-top:0"><div class="lbl" data-t="ctl.panel">Panel</div>
+      <div class="btns">
+        <button id="btn-screenoff" onclick="sendCommand('screenOff')" data-t="ctl.screenOff">Screen off</button>
+        <button id="btn-screenon" onclick="sendCommand('screenOn')" data-t="ctl.screenOn">Screen on</button>
+        <button id="btn_ss" onclick="pressScreensaver('btn_ss')" data-t="tab.screensaver">Screensaver</button>
+      </div>
+    </div>
+
+    <div class="set"><div class="lbl" data-t="ctl.source">Source</div>
+      <div class="btns" id="inputs"></div>
+    </div>
+
+    <div class="set" data-col="0"><div class="lbl"><span data-t="ctl.volume">Volume</span> &middot; <span id="vol" class="num">&mdash;</span></div>
+      <div class="vol-row" id="vol-row">
+        <div class="vol-wrap" id="vol-wrap" role="group" aria-label="Volume" data-t-aria-label="ctl.volume">
+          <div class="vol-fill" id="vol-fill"></div>
+          <input type="range" id="vol-slider" min="0" max="100" value="0" aria-label="Volume" data-t-aria-label="ctl.volume">
+        </div>
+        <div class="vol-steps" id="vol-steps" hidden>
+          <button onclick="sendCommand('volumeStep',-1)" aria-label="Volume down" data-t-aria-label="ctl.volumeDown" translate="no">&minus;</button>
+          <button onclick="sendCommand('volumeStep',1)" aria-label="Volume up" data-t-aria-label="ctl.volumeUp" translate="no">+</button>
+        </div>
+        <button id="mute" onclick="toggleMute()" data-t="ctl.mute">Mute</button>
+      </div>
+    </div>
+
+    <div class="set"><div class="lbl" data-t="ctl.playback">Playback</div>
+      <div class="playback-btns">
+        <button onclick="sendCommand('media','rewind')" data-t="ctl.rewind">Rewind</button>
+        <button onclick="sendCommand('media','playPause')" data-t="ctl.playPause">Play / Pause</button>
+        <button onclick="sendCommand('media','stop')" data-t="ctl.stop">Stop</button>
+        <button onclick="sendCommand('media','fastForward')" data-t="ctl.fastForward">Fast Fwd</button>
+      </div>
+    </div>
+
+    <!-- Pinned to the first column: it is the one control here that people
+         reach for repeatedly, so it should not move about as the others grow. -->
+    <details class="disc" id="disc-dpad" data-col="0">
+      <summary><span data-t="ctl.dpad">D-pad</span> <span class="cur" data-t="ctl.dpad.sub">Navigate the TV</span></summary>
+
+      <div class="set">
+        <div class="dpad">
+          <button class="dp dp-up" data-rcu="up"    onclick="sendCommand('rcu','up')"    title="Up" data-t-title="ctl.up">&#9650;</button>
+          <button class="dp dp-left" data-rcu="left"  onclick="sendCommand('rcu','left')"  title="Left" data-t-title="ctl.left">&#9664;</button>
+          <button class="dp dp-ok" data-rcu="ok"    onclick="sendCommand('rcu','ok')"    title="Select" data-t-title="ctl.select" translate="no">OK</button>
+          <button class="dp dp-right" data-rcu="right" onclick="sendCommand('rcu','right')" title="Right" data-t-title="ctl.right">&#9654;</button>
+          <button class="dp dp-down" data-rcu="down"  onclick="sendCommand('rcu','down')"  title="Down" data-t-title="ctl.down">&#9660;</button>
+        </div>
+        <div class="btns">
+          <button onclick="sendCommand('rcu','back')" data-rcu="back" data-t="ctl.back">Back</button>
+          <button onclick="sendCommand('rcu','home')" data-rcu="home" data-t="ctl.home">Home</button>
+          <button onclick="sendCommand('rcu','settings')" data-rcu="settings" data-t="ctl.settings">Settings</button>
+        </div>
+        <p class="sub dpad-keys" data-t="ctl.dpad.keys">On a keyboard: the arrows, Enter for OK, Esc or Backspace for Back, H for Home, M for Settings, Space to play or pause, K to mute.</p>
+      </div>
+    </details>
+
+    <details class="disc" id="disc-timers">
+      <summary><span data-t="ctl.sleep">Sleep timer</span> <span class="cur" id="tl-cur"></span></summary>
+
+      <div class="set">
+        <div class="btns" id="sleepbtns">
+          <button id="sl_off" onclick="sendCommand('sleepTimer','off')" data-t="common.off">Off</button>
+          <button id="sl_10"  onclick="sendCommand('sleepTimer','10')" data-t="ctl.sleep.10">10 min</button>
+          <button id="sl_30"  onclick="sendCommand('sleepTimer','30')" data-t="ctl.sleep.30">30 min</button>
+          <button id="sl_60"  onclick="sendCommand('sleepTimer','60')" data-t="ctl.sleep.60">60 min</button>
+          <button id="sl_90"  onclick="sendCommand('sleepTimer','90')" data-t="ctl.sleep.90">90 min</button>
+          <button id="sl_120" onclick="sendCommand('sleepTimer','120')" data-t="ctl.sleep.120">120 min</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="disc" id="disc-display">
+      <summary><span data-t="ctl.picture">Picture</span> <span class="cur" id="ds-cur"></span></summary>
+
+      <div class="set"><div class="lbl"><span data-t="ctl.pictureMode">Mode</span> &middot; <span id="picmode-lbl" class="num">&mdash;</span></div>
+        <!-- Built from what the TV says it will accept: the settable modes
+             change with the dynamic range of what is playing. -->
+        <div class="btns" id="picmodes"></div>
+      </div>
+
+      <!-- The current picture mode's own level: the TV keeps one per mode. -->
+      <div class="set"><div class="lbl"><span id="bl-name"></span> &middot; <span id="bl-lbl" class="num">&mdash;</span></div>
+        <div class="vol-row">
+          <div class="vol-wrap full" id="bl-wrap" role="group" aria-label="OLED light" data-t-aria-label="ctl.oledLight">
+            <div class="vol-fill" id="bl-fill"></div>
+            <input type="range" id="bl-slider" min="0" max="100" value="0" aria-label="OLED light" data-t-aria-label="ctl.oledLight">
+          </div>
+        </div>
+      </div>
+
+      <div class="set"><div class="lbl"><span data-t="ctl.energySaving">Energy saving</span> &middot; <span id="energy-lbl" class="num">&mdash;</span></div>
+        <div class="btns" id="energysteps">
+          <button id="es_auto" onclick="sendCommand('energySaving','auto')" data-t="energy.auto">Auto</button>
+          <button id="es_off" onclick="sendCommand('energySaving','off')" data-t="common.off">Off</button>
+          <button id="es_min" onclick="sendCommand('energySaving','min')" data-t="energy.min">Minimum</button>
+          <button id="es_med" onclick="sendCommand('energySaving','med')" data-t="energy.med">Medium</button>
+          <button id="es_max" onclick="sendCommand('energySaving','max')" data-t="energy.max">Maximum</button>
+          <button id="es_screen_off" onclick="sendCommand('energySaving','screen_off')" data-t="ctl.screenOff">Screen off</button>
+        </div>
+      </div>
+
+    </details>
+
+    <details class="disc" id="disc-sound">
+      <summary><span data-t="ctl.sound">Sound</span> <span class="cur" id="snd-cur"></span></summary>
+
+      <div class="set"><div class="lbl"><span data-t="ctl.soundOutput">Output</span> &middot; <span id="soundout-lbl" class="num">&mdash;</span></div>
+        <div class="btns" id="soundouts">
+          <button id="so_tv_speaker" onclick="sendCommand('soundOutput','tv_speaker')" data-t="sound.tvSpeaker">TV Speaker</button>
+          <button id="so_external_arc" onclick="sendCommand('soundOutput','external_arc')" translate="no">HDMI ARC</button>
+          <button id="so_optical" onclick="sendCommand('soundOutput','optical')" data-t="sound.optical">Optical</button>
+          <button id="so_headphone" onclick="sendCommand('soundOutput','headphone')" data-t="sound.headphone">Headphone / AUX</button>
+          <button id="so_bt_soundbar" onclick="sendCommand('soundOutput','bt_soundbar')" translate="no">Bluetooth</button>
+          <button id="soundout-extra" class="on" hidden translate="no"></button>
+          <select id="so_more" class="so-more" hidden aria-label="More outputs" data-t-aria-label="sound.more.label"
+            onchange="if (this.value) sendCommand('soundOutput', this.value)"></select>
+        </div>
+      </div>
+      <!-- Only while something plays: the TV reports no format otherwise. -->
+      <div class="set" id="sound-format-set" hidden><div class="lbl"><span data-t="ctl.soundFormat">Current sound format</span> &middot; <span id="sound-format" class="num" translate="no">&mdash;</span></div></div>
+    </details>
+
+    <details class="disc" id="disc-apps">
+      <summary><span data-t="tab.apps">Apps</span> <span class="cur" id="currapp-lbl"></span></summary>
+      <div class="set">
+        <div class="app-grid" id="apps"></div>
+      </div>
+    </details>
+
+    <details class="disc" id="disc-remote-tools">
+      <summary><span data-t="ctl.remoteTools">Remote tools &amp; utilities</span> <span class="cur" data-t="ctl.remoteTools.sub">Notification and web page</span></summary>
+
+      <div class="set"><div class="lbl"><span data-t="ctl.toast">Screen notification</span> <span class="sub" id="toast-count" translate="no" style="float:right;margin:0">0/120</span></div>
+        <form class="toast-form" onsubmit="event.preventDefault();sendToast();">
+          <input type="text" id="toast-input" placeholder="Message to display on TV screen..." data-t-placeholder="ctl.toast.placeholder" maxlength="120" autocomplete="off">
+          <button type="submit" id="btn-toast" data-t="ctl.toast.send">Send</button>
+        </form>
+      </div>
+
+      <div class="set"><div class="lbl" data-t="ctl.openUrl">Open a web page</div>
+        <form class="toast-form" onsubmit="event.preventDefault();openUrl();">
+          <input type="text" id="url-input" placeholder="https://example.com" translate="no" maxlength="2048" autocomplete="off" spellcheck="false">
+          <button type="submit" id="btn-url" data-t="ctl.openUrl.open">Open</button>
+        </form>
+      </div>
+    </details>
+
+    <div class="set" id="pwset"><div class="lbl" data-t="adv.power">Power</div>
+      <div class="btns">
+        <button id="poff" onclick="powerAction(pwStandby ? 'powerOn' : 'powerOff')">&mdash;</button>
+        <button id="prb" onclick="powerAction('reboot')" data-t="ctl.reboot">Reboot</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="priv panel" id="svcpane" role="tabpanel" hidden>
+  <div id="svc-rows"></div>
+
+  <div class="oled-warn" data-t="svc.warn">
+    The service menu is LG's own engineering menu. It can change panel
+    calibration and hardware settings that the normal menus deliberately keep
+    out of reach, and some of them are not easy to put back. Opening it asks for
+    the PIN on the TV.
+  </div>
+</section>
+
+<section class="priv panel" id="oledpane" role="tabpanel" hidden>
+  <div class="oled-split">
+    <div class="oled-wear">
+      <div class="grp" data-t="oled.panelLife">Panel life</div>
+      <div class="lbl" data-t="oled.hours">Total power on hours</div>
+      <div class="n num" style="margin-top:10px"><span id="oc-hours">&mdash;</span><em data-t="oled.hoursUnit">hours</em></div>
+      <div class="cols" style="margin-top:22px">
+        <div>
+          <div class="lbl" data-t="oled.compIn">Panel maintenance in</div>
+          <div class="v num" id="oc-comp">&mdash;</div>
+          <div class="track oc-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"><b id="oc-comp-bar" style="width:0%"></b></div>
+          <div class="sub" id="oc-comp-sub">&mdash;</div>
+        </div>
+        <div>
+          <div class="lbl" data-t="oled.refresherIn">Pixel refresher in</div>
+          <div class="v num" id="oc-refr">&mdash;</div>
+          <div class="track oc-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"><b id="oc-refr-bar" style="width:0%"></b></div>
+          <div class="sub" id="oc-refr-sub">&mdash;</div>
+        </div>
+      </div>
+      <div class="oc-counts" id="oc-counts" hidden>
+        <div class="grp" data-t="oled.counts">Lifetime counts</div>
+        <div id="oc-cycles"></div>
+      </div>
+    </div>
+
+    <div class="oled-controls">
+      <div class="grp" data-t="oled.protections">Protections</div>
+      <div id="oled-rows"></div>
+
+      <div class="oled-warn" id="oled-warn" hidden data-t="oled.warn">
+        Note: the last two are normally reachable only from the TV's service menu.
+        They exist to protect the panel from burn-in, and switching them off makes
+        permanent image retention more likely. Doing so may affect your warranty.
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="priv panel" id="gamepane" role="tabpanel" hidden>
+  <div class="oled-split">
+    <div class="oled-wear">
+      <div class="grp" data-t="game.now">Playing now</div>
+      <div class="lbl" id="gm-lbl">&mdash;</div>
+      <div class="n num game-fps" style="margin-top:10px"><span id="gm-fps">&mdash;</span><em id="gm-unit"></em></div>
+      <div class="cols" style="margin-top:22px">
+        <div><div class="lbl" data-t="game.vrr">VRR</div><div class="v" id="gm-vrr">&mdash;</div></div>
+        <div><div class="lbl" data-t="game.input">Input</div><div class="v" id="gm-input">&mdash;</div></div>
+      </div>
+      <div class="sub" id="gm-note" style="margin-top:14px"></div>
+    </div>
+    <div class="oled-controls">
+      <div class="grp" data-t="game.optimizer">Game Optimizer</div>
+      <div class="sub" id="gm-scope" style="margin-bottom:14px"></div>
+      <div id="game-rows" data-reload="loadGame"></div>
+    </div>
+  </div>
+</section>
+
+<section class="priv panel" id="advpane" role="tabpanel" hidden>
+  <div class="lbl" data-t="tab.advanced">Advanced</div>
+  <div class="pv-sec" data-t="adv.powerStandby">Power &amp; standby</div>
+  <div class="prot-table">
+    <div class="prot-row" id="row-quickboot" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.quickBoot">Quick Boot</div>
+        <div class="prot-desc" data-t="adv.quickBoot.desc">Switching off puts the TV into a light sleep rather than shutting it down, so it
+          comes back on faster. LG calls this Quick Start+.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="btn_quickboot" onclick="toggleQuickBoot()">&mdash;</button></div>
+    </div>
+    <div class="prot-row" id="row-ar" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.stayConnected">Stay connected when off</div>
+        <div class="prot-desc" data-t="adv.stayConnected.desc">Keeps the TV on the network while it is switched off, apart from five hours each
+          night, so this dashboard and Home Assistant keep working and can switch it back on. The screen stays dark. Uses about 12 W on an LG
+          C2, against almost nothing in normal standby.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="btn_ar" onclick="toggleAlwaysReady()">&mdash;</button></div>
+    </div>
+    <div class="prot-row" id="row-ars" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.alwaysReady">Always Ready</div>
+        <div class="prot-desc" data-t="adv.alwaysReady.desc">Switched off with the remote, the TV shows LG's Always Ready screen, such as a
+          clock or artwork, instead of going dark, from the next time it is switched off. Uses about 30 W on an LG C2, close
+          to what it uses when on. The first time, the TV asks for OK on the remote. Home turns the TV back on from the
+          clock; the power button switches it fully off.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="btn_ars" onclick="toggleAlwaysReadyScreen()">&mdash;</button></div>
+    </div>
+    <div class="prot-row" id="row-aroff" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.nightlyOff">Nightly power-down</div>
+        <div class="prot-desc" data-t="adv.nightlyOff.desc">For five hours every night, LG lets a switched-off TV sleep fully. It is
+          offline then: this dashboard and Home Assistant can't reach it until the hours
+          end or it is switched on. LG fixes the length; choose hours when the TV isn't used.</div>
+      </div>
+      <div class="prot-status"><select class="pill-sel" id="sel_aroff" aria-label="Nightly power-down hours" data-t-aria-label="adv.nightlyOff.hours"
+        onchange="sendCommand('alwaysReadyOffStart', this.value)"></select></div>
+    </div>
+    <div class="prot-row" id="row-wol" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.wol">Wake-on-LAN</div>
+        <div class="prot-desc" data-t="adv.wol.desc">Lets Home Assistant, a phone or another device on the network switch the TV on
+          from standby. Requires Quick Boot (Quick Start+) to keep the network connection responsive while off. The Home Assistant guide shows how to set it up. LG calls this Mobile TV On.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="btn_wol" onclick="toggleWol()">&mdash;</button></div>
+    </div>
+  </div>
+
+  <div class="pv-sec adv-sec" id="adv-timers" hidden data-t="adv.timers">Timers</div>
+  <div class="prot-table">
+    <div class="prot-row" id="row-ontimer" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.onTimer">On Timer</div>
+        <div class="prot-desc" data-t="adv.onTimer.desc">Switches the TV on at this time, once or on the days picked.</div>
+        <div class="prot-desc" id="ontimer-autooff" hidden data-t="adv.onTimer.autoOff">Switched on this way, the TV goes
+          back off after two hours unless a button is pressed. That can be turned off in the TV's own Timers menu.</div>
+      </div>
+      <div class="prot-status timer-ctl">
+        <input type="time" class="pill-sel" id="time_ontimer" aria-label="On Timer time" data-t-aria-label="adv.onTimer.time"
+          onchange="setPowerTimer('on', { time: this.value })">
+        <button type="button" class="pill idle" id="btn_ontimer" onclick="togglePowerTimer('on')">&mdash;</button>
+      </div>
+      <div class="timer-days" id="days_ontimer"></div>
+    </div>
+    <div class="prot-row" id="row-offtimer" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.offTimer">Off Timer</div>
+        <div class="prot-desc" data-t="adv.offTimer.desc">Switches the TV off at this time, once or on the days picked.</div>
+      </div>
+      <div class="prot-status timer-ctl">
+        <input type="time" class="pill-sel" id="time_offtimer" aria-label="Off Timer time" data-t-aria-label="adv.offTimer.time"
+          onchange="setPowerTimer('off', { time: this.value })">
+        <button type="button" class="pill idle" id="btn_offtimer" onclick="togglePowerTimer('off')">&mdash;</button>
+      </div>
+      <div class="timer-days" id="days_offtimer"></div>
+    </div>
+  </div>
+
+  <div class="pv-sec adv-sec" id="adv-screentime" data-t="adv.screenTime">Screen time</div>
+  <div class="prot-table">
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.screenTime.limits">Screen-time limits</div>
+        <div class="prot-desc" data-t="adv.screenTime.desc">Limits how long the screen is on each day, in all and per app or
+          input, and keeps it off at bedtime. The TV shows a warning five minutes before a limit, and another when it is
+          reached, then does what is chosen below a minute later.</div>
+        <div class="prot-desc st-note" id="st-note" hidden></div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="st-enabled" onclick="toggleScreenTime()">&mdash;</button></div>
+    </div>
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.screenTime.daily">Daily limit</div>
+        <div class="prot-desc" data-t="adv.screenTime.daily.desc">The screen time allowed each day, counted from midnight on the TV’s clock.</div>
+        <div class="prot-desc" id="st-today" hidden></div>
+      </div>
+      <div class="prot-status"><select class="pill-sel" id="st-daily" aria-label="Daily limit" data-t-aria-label="adv.screenTime.daily"
+        onchange="saveScreenTime({ dailyMinutes: Number(this.value) })"></select></div>
+    </div>
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.screenTime.bedtime">Bedtime</div>
+        <div class="prot-desc" data-t="adv.screenTime.bedtime.desc">Between these two times, the TV does what is chosen below. Clearing either time turns bedtime off.</div>
+      </div>
+      <div class="prot-status timer-ctl">
+        <input type="time" class="pill-sel" id="st-bed-from" aria-label="Bedtime starts" data-t-aria-label="adv.screenTime.bedtime.from"
+          onchange="saveScreenTime({ bedtimeStart: this.value })">
+        <input type="time" class="pill-sel" id="st-bed-to" aria-label="Bedtime ends" data-t-aria-label="adv.screenTime.bedtime.to"
+          onchange="saveScreenTime({ bedtimeEnd: this.value })">
+      </div>
+    </div>
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.screenTime.action">At the daily limit or bedtime</div>
+      </div>
+      <div class="prot-status"><select class="pill-sel" id="st-action" aria-label="At the daily limit or bedtime" data-t-aria-label="adv.screenTime.action"
+        onchange="saveScreenTime({ action: this.value })"></select></div>
+    </div>
+    <div class="prot-row" id="st-apps-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.screenTime.apps">App and input limits</div>
+        <div class="prot-desc" data-t="adv.screenTime.apps.desc">Minutes a day for one app or input. Those watched in the last 30 days can be picked.</div>
+      </div>
+      <div class="prot-status"><select class="pill-sel" id="st-add" aria-label="Add a limit" data-t-aria-label="adv.screenTime.add"
+        onchange="addScreenTimeApp(this.value)"></select></div>
+      <div class="st-apps" id="st-apps"></div>
+    </div>
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.screenTime.appAction">At an app or input’s limit</div>
+      </div>
+      <div class="prot-status"><select class="pill-sel" id="st-app-action" aria-label="At an app or input’s limit" data-t-aria-label="adv.screenTime.appAction"
+        onchange="saveScreenTime({ appAction: this.value })"></select></div>
+    </div>
+  </div>
+
+  <div class="pv-sec adv-sec" id="adv-updates" data-t="adv.systemUpdates">System updates</div>
+  <div class="prot-table">
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="server.tvUpdates.block">Block TV software updates</div>
+        <div class="prot-desc" data-t="server.tvUpdates.block.desc">Stops the TV installing LG's system
+          updates, which can take away the access Glasshouse runs with. Apps and Glasshouse's own updates are
+          unaffected.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="upd-tvblock" onclick="toggleTvUpdates()">&mdash;</button></div>
+    </div>
+  </div>
+
+  <div class="pv-sec adv-sec" id="adv-display" hidden data-t="adv.display">Display</div>
+  <div class="prot-table">
+    <div class="prot-row" id="row-lglogo" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.lgLogo">LG logo</div>
+        <div class="prot-desc" data-t="adv.lgLogo.desc">Shows the LG logo as the TV switches on and off. LG calls this LG Logo Display.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="btn_lglogo" onclick="toggleLgLogo()">&mdash;</button></div>
+    </div>
+  </div>
+
+  <!-- Only where PicCap is installed. -->
+  <div class="pv-sec adv-sec" id="adv-piccap" hidden data-t="adv.ambient">Ambient light</div>
+  <div class="prot-table">
+    <div class="prot-row" id="row-piccap" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.piccap">PicCap capture</div>
+        <div class="prot-desc" data-t="adv.piccap.desc">Sends what is on screen to PicCap's Hyperion server, which drives an ambient light behind the TV. Off stops the capture, and the light with it.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="btn_piccap" onclick="togglePiccap()">&mdash;</button></div>
+    </div>
+  </div>
+
+  <div class="pv-sec adv-sec" id="adv-sound" hidden data-t="adv.sound">Sound</div>
+  <div class="prot-table" id="adv-lgs-sound" data-reload="loadAdvSettings"></div>
+
+  <div class="pv-sec adv-sec" id="adv-hdmi" hidden data-t="adv.hdmi">HDMI inputs</div>
+  <div class="hdmi-in" id="adv-lgs-hdmi" data-reload="loadAdvSettings"></div>
+
+  <div class="pv-sec adv-sec" id="adv-devices" hidden data-t="adv.devices">Devices</div>
+  <div class="prot-table">
+    <div id="adv-lgs-devices" data-reload="loadAdvSettings" style="display:contents"></div>
+    <div class="prot-row" id="row-devdetect" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.deviceDetection">Auto device detection</div>
+        <div class="prot-desc" data-t="adv.deviceDetection.desc">Lets the TV find devices at home that it can show on its Home Dashboard and control:
+          a set-top box on an HDMI input, and smart lights, plugs and switches on your network. On newer TVs it looks up every address on your home network each time the TV switches
+          on, which a network-wide ad blocker such as Pi-hole shows as hundreds of requests. Switched off, the scans
+          stop and the TV no longer finds devices by itself.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="btn_devdetect" onclick="toggleDeviceDetection()">&mdash;</button></div>
+    </div>
+  </div>
+
+  <div class="pv-sec adv-sec" id="adv-lights" hidden data-t="adv.frontLights">Front lights</div>
+  <div class="prot-table">
+    <div class="prot-row" id="row-standby" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.standbyLight">Standby light</div>
+        <div class="prot-desc" data-t="adv.standbyLight.desc">The small light on the front of the TV that shows while it is switched off.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="lt_standby" onclick="toggleLight('standbyLight')">&mdash;</button></div>
+    </div>
+    <div class="prot-row" id="row-logolight" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="adv.logoLight">Logo light</div>
+        <div class="prot-desc" data-t="adv.logoLight.desc">The lit LG logo on the front of the TV, on models that have one.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="lt_logo" onclick="toggleLight('logoLight')">&mdash;</button></div>
+    </div>
+  </div>
+</section>
+
+<section class="priv panel" id="sspane" role="tabpanel" hidden>
+  <!-- On webOS 12 and later custom screen savers are experimental (#366, #768). -->
+  <div class="prot-table ss-exp" id="ss-exp" hidden>
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" id="ss-exp-title"></div>
+        <div class="prot-desc" id="ss-exp-desc"></div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="ss-exp-btn" onclick="toggleSsExperimental()">&mdash;</button></div>
+    </div>
+  </div>
+  <div class="ss-split">
+  <div id="ss-list" class="ss-list"></div>
+  <div class="ss-side">
+  <div class="ss-level-row" id="ss-level-row" hidden>
+    <div class="ss-level-lbl" data-t="ss.brightness">Brightness</div>
+    <div class="btns" id="ss-level"></div>
+  </div>
+
+  <div class="ss-level-row">
+    <div class="ss-level-lbl" data-t="ss.showNow">Show it now</div>
+    <div class="btns">
+      <button id="ss-toggle" onclick="pressScreensaver('ss-toggle')">&mdash;</button>
+    </div>
+  </div>
+
+  <div class="pv-note" id="ss-note"></div>
+  </div>
+  </div>
+</section>
+
+<section class="priv panel" id="appspane" role="tabpanel" hidden>
+  <div class="lbl" data-t="apps.heading">Apps &amp; Home Screen Launcher</div>
+
+  <div class="apps-grp" id="apps-grp-apps">
+    <div class="apps-grp-h" data-t="apps.group.apps">Apps</div>
+    <div class="pv-sub apps-grp-d" data-t="apps.group.apps.desc">The apps and web pages on the TV: adding them and removing them.</div>
+
+    <details class="pv-d" id="disc-installed-apps">
+      <summary><span data-t="apps.manage">Manage applications</span> <span class="cur" id="apps-installed-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.manage.desc">Store downloads and user-installed applications. Launch opens the application on the TV, or click Uninstall to permanently remove it and free up internal eMMC flash storage space.</div>
+      <div class="prot-table" id="apps-installed-list">
+        <div class="sub" style="padding:16px 0" data-t="apps.loadingInstalled">Loading installed apps&hellip;</div>
+      </div>
+    </details>
+
+    <div class="pv-note restore-apps" id="restore-apps" hidden>
+      <div class="pv-sub" id="restore-apps-text"></div>
+      <div class="btns backup-btns">
+        <button type="button" id="restore-apps-install" onclick="installRestoredApps()" data-t="apps.restore.installAll">Install all</button>
+        <button type="button" id="restore-apps-dismiss" onclick="dismissRestoredApps()" data-t="apps.restore.dismiss">Dismiss</button>
+      </div>
+    </div>
+    <details class="pv-d" id="disc-install-apps">
+      <summary><span data-t="apps.install">Install homebrew apps</span> <span class="cur" id="apps-catalog-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.install.desc">Apps from the Homebrew Channel catalog.</div>
+      <div class="catalog-seg" id="catalog-categories" role="group" aria-label="Category" data-t-aria-label="apps.catalog.categories">
+        <button type="button" class="catalog-cat-btn on" data-cat="all" onclick="setCatalogCategory('all')" data-t="apps.cat.all">All</button>
+        <button type="button" class="catalog-cat-btn" data-cat="multimedia" onclick="setCatalogCategory('multimedia')" data-t="apps.cat.media">Media</button>
+        <button type="button" class="catalog-cat-btn" data-cat="game" onclick="setCatalogCategory('game')" data-t="apps.cat.games">Games</button>
+        <button type="button" class="catalog-cat-btn" data-cat="utility" onclick="setCatalogCategory('utility')" data-t="apps.cat.utilities">Utilities</button>
+        <button type="button" class="catalog-cat-btn" data-cat="amblight" onclick="setCatalogCategory('amblight')" data-t="apps.cat.amblight">Ambilight</button>
+        <button type="button" class="catalog-cat-btn" data-cat="screensaver" onclick="setCatalogCategory('screensaver')" data-t="apps.cat.screensavers">Screensavers</button>
+      </div>
+      <form class="toast-form" onsubmit="event.preventDefault();">
+        <input type="search" id="catalog-search" placeholder="Search apps" data-t-placeholder="apps.install.search" maxlength="60"
+          autocomplete="off" spellcheck="false" oninput="renderCatalog()">
+      </form>
+      <div class="sub page-add-msg" id="catalog-msg" role="alert"></div>
+      <div class="pv-note" id="install-status" hidden>
+        <div class="upd-prog" id="inst-prog">
+          <div class="upd-step" id="inst-step"></div>
+          <div class="track" id="inst-track" hidden><b id="inst-bar"></b></div>
+        </div>
+      </div>
+      <div id="install-modal" class="modal-backdrop" hidden onclick="if(event.target===this)cancelInstall()">
+        <div class="modal-card" id="install-panel" hidden>
+          <div class="prot-title" id="inst-title">&mdash;</div>
+          <div class="prot-desc" id="inst-meta">&mdash;</div>
+          <div class="prot-desc" id="inst-apps"></div>
+          <div id="inst-services-row" hidden>
+            <div class="prot-desc" id="inst-services"></div>
+            <label class="cfg-ent-chk"><input type="checkbox" id="inst-root"><span data-t="apps.install.root">Run services as root (needs the Homebrew Channel)</span></label>
+            <div class="prot-desc" id="inst-root-note" hidden></div>
+          </div>
+          <div class="prot-desc" id="inst-cpu" hidden></div>
+          <div class="prot-desc" id="inst-screensaver" hidden></div>
+          <div class="prot-desc" id="inst-space"></div>
+          <div class="prot-desc" id="inst-hash" hidden></div>
+          <div id="inst-store-row" hidden>
+            <div class="prot-desc" data-t="apps.install.store.warn">This app was installed from the LG store. Replacing it stops store updates for it.</div>
+            <label class="cfg-ent-chk"><input type="checkbox" id="inst-replace"><span data-t="apps.install.store.replace">Replace the store version</span></label>
+          </div>
+          <div class="btns" style="margin-top:16px;max-width:420px">
+            <button type="button" id="inst-confirm" onclick="confirmInstall()" data-t="apps.install.confirm">Install</button>
+            <button type="button" id="inst-cancel" onclick="cancelInstall()" data-t="common.cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+      <div class="prot-table" id="apps-catalog-list">
+        <div class="sub" style="padding:16px 0" data-t="apps.install.loading">Loading the catalog&hellip;</div>
+      </div>
+    </details>
+
+    <details class="pv-d" id="disc-other-catalogs">
+      <summary><span data-t="apps.catalogs">Other app catalogs</span> <span class="cur" id="apps-catalogs-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.catalogs.desc">Catalogs other than the Homebrew Channel's, such as one a developer keeps for their own app. Their apps are listed here and checked for updates, as the Homebrew Channel's are.</div>
+      <div class="pv-note" id="catalogs-off" hidden>
+        <div class="prot-desc" data-t="apps.catalogs.off">Adding a catalog needs Install app from a URL or file turned on, or a token, since whoever runs a catalog chooses what it offers to install.</div>
+      </div>
+      <form class="toast-form page-add" id="catalog-add-form" hidden onsubmit="event.preventDefault();addCatalog();">
+        <input type="text" id="catalog-url" placeholder="Catalog address, or its GitHub page" data-t-placeholder="apps.catalogs.placeholder" maxlength="2048"
+          autocomplete="off" spellcheck="false">
+        <button type="submit" id="catalog-add-btn" data-t="apps.catalogs.add">Add catalog</button>
+      </form>
+      <div class="sub page-add-msg" id="catalogs-msg" role="alert"></div>
+      <div class="prot-table" id="apps-catalogs-repos"></div>
+      <form class="toast-form" id="others-search-form" hidden onsubmit="event.preventDefault();">
+        <input type="search" id="others-search" placeholder="Search apps" data-t-placeholder="apps.install.search" maxlength="60"
+          autocomplete="off" spellcheck="false" oninput="renderOtherCatalogs()">
+      </form>
+      <div class="prot-table" id="apps-others-list"></div>
+    </details>
+    <details class="pv-d" id="disc-sideload-apps">
+      <summary><span data-t="apps.sideload.heading">Install app from a URL or file</span> <span class="cur" id="apps-sideload-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.sideload.desc">Install an application package (.ipk) directly from a download link or by uploading a file from your computer.</div>
+      <div class="pv-note" id="sideload-off" hidden>
+        <div class="prot-title" data-t="apps.sideload.off.title">Install from a URL or a file</div>
+        <div class="prot-desc" data-t="apps.sideload.off.desc">This is off, because a package from outside the catalog can run anything on the TV. You can turn it on below, or by setting a token.</div>
+        <div style="margin-top:10px"><button type="button" class="pill warn" id="btn-sideload-enable" onclick="toggleSideload(true)" data-t="apps.sideload.enable">Turn on install from URL or file&hellip;</button></div>
+      </div>
+      <div id="sideload-box" hidden>
+        <div class="prot-title" data-t="apps.sideload.url.title">From URL&hellip;</div>
+        <form class="toast-form page-add" id="sl-url-form" onsubmit="event.preventDefault();startUrlInstall();">
+          <input type="text" id="sl-url" placeholder="Address of an .ipk, such as https://example.org/app.ipk" data-t-placeholder="apps.sideload.url.placeholder" maxlength="2048"
+            autocomplete="off" spellcheck="false">
+          <input type="text" id="sl-sha" placeholder="sha256 (optional)" data-t-placeholder="apps.sideload.sha.placeholder" maxlength="64"
+            autocomplete="off" spellcheck="false">
+          <button type="submit" id="sl-url-btn" data-t="apps.sideload.url.go">Download and check</button>
+        </form>
+        <div class="prot-title" data-t="apps.sideload.file.title">Upload .ipk</div>
+        <form class="toast-form page-add" id="sl-file-form" onsubmit="event.preventDefault();uploadIpk();">
+          <input type="file" id="sl-file" accept=".ipk" aria-label="Package file" data-t-aria-label="apps.sideload.file.label">
+          <button type="submit" id="sl-file-btn" data-t="apps.sideload.file.go">Upload and check</button>
+        </form>
+        <div style="margin-top:12px"><button type="button" class="pill idle" id="btn-sideload-disable" onclick="toggleSideload(false)" data-t="apps.sideload.disable">Turn off install from URL or file</button></div>
+      </div>
+    </details>
+
+    <details class="pv-d" id="disc-saved-pages">
+      <summary><span data-t="apps.pages">Saved web pages</span> <span class="cur" id="apps-pages-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.pages.desc">Web pages on the TV's home screen, each opening in its browser. A page saved
+        from the browser takes its whole title as its name, so a long one can be given a shorter name
+        here. Pages can also be added, pointed at a new address, or removed.</div>
+      <div class="prot-table" id="apps-pages-list"></div>
+      <form class="toast-form page-add" id="page-add" onsubmit="event.preventDefault();addPage();">
+        <input type="text" id="page-add-url" placeholder="Web address, such as bbc.co.uk/weather" data-t-placeholder="apps.pages.urlPlaceholder" maxlength="2048"
+          autocomplete="off" spellcheck="false">
+        <input type="text" id="page-add-name" placeholder="Name (optional)" data-t-placeholder="apps.pages.namePlaceholder" maxlength="60" autocomplete="off">
+        <button type="submit" id="page-add-btn" data-t="apps.pages.add">Add to home screen</button>
+      </form>
+      <div class="sub page-add-msg" id="page-add-msg" role="alert"></div>
+    </details>
+  </div>
+
+  <div class="apps-grp" id="apps-grp-launch">
+    <div class="apps-grp-h" data-t="apps.group.launch">Home screen and remote</div>
+    <div class="pv-sub apps-grp-d" data-t="apps.group.launch.desc">What the Home screen shows, and what the remote&rsquo;s number keys open.</div>
+
+    <details class="pv-d" id="disc-homescreen" hidden>
+      <summary><span data-t="apps.home">Home screen layout</span> <span class="cur" id="apps-home-summary"></span></summary>
+      <div class="pv-note" data-glasshouse-home-note hidden><span data-t="apps.glasshouseHomeNote">Glasshouse Home is switched on, so this applies only to LG&rsquo;s Home, seen from its tile, by holding Home, or while Glasshouse starts.</span> <a href="?tab=home" onclick="event.preventDefault(); showTab('home')" data-t="apps.glasshouseHomeLink">Arrange Glasshouse Home</a></div>
+      <div class="pv-sub" data-t="apps.home.desc">Which parts of LG&rsquo;s Home screen show, and which inputs have a tile among the apps. A change takes a few seconds, while the Home screen starts again.</div>
+      <div class="prot-table" id="apps-home-exp" hidden>
+        <div class="prot-row">
+          <div class="prot-main">
+            <div class="prot-title" data-t="apps.home.exp.title">Experimental on this TV</div>
+            <div class="prot-desc" data-t="apps.home.exp.desc">On webOS 10 Glasshouse lays its own Home screen layout over LG&rsquo;s each time the TV starts, so LG&rsquo;s can show for a moment first, and it has been tried on only a few TVs. Put back LG&rsquo;s Home screen, or switching this off, undoes it.</div>
+          </div>
+          <div class="prot-status"><button type="button" class="pill idle" id="btn-home-allow" onclick="toggleHomeLayoutAllowed('btn-home-allow')">&mdash;</button></div>
+        </div>
+      </div>
+      <div class="pv-g" id="apps-home-inputs-h" data-t="apps.home.inputs">Inputs on Home</div>
+      <div id="apps-home-inputs" style="margin-top:12px"></div>
+      <div class="pv-g" data-t="apps.home.parts">Parts of the Home screen</div>
+      <div class="prot-table" id="apps-home-parts"></div>
+      <div class="btns" style="margin-top:14px;max-width:420px">
+        <button type="button" class="pill idle" id="btn-home-restore" onclick="restoreHome()" data-t="apps.home.restore">Put back LG&rsquo;s Home screen</button>
+      </div>
+    </details>
+
+    <details class="pv-d" id="disc-quickaccess" hidden>
+      <summary><span data-t="apps.quickAccess">Quick Access</span> <span class="cur" id="apps-qa-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.quickAccess.desc">Holding a number key on the remote opens the app or input set for it. A change here applies on the TV straight away.</div>
+      <div id="apps-qa-list"></div>
+    </details>
+
+    <details class="pv-d" id="disc-remotekeys" hidden>
+      <summary><span data-t="apps.remoteKeys">Remote keys</span> <span class="cur" id="apps-rk-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.remoteKeys.desc">What a key on the remote does: as LG has it, nothing, or opening an app or input instead. A change applies straight away and lasts across reboots. A key set here is taken before any app sees it, so an app that uses the key itself, such as YouTube with Guide, no longer gets it. The keys listed are the ones this TV handles; a given remote may not have them all.</div>
+      <div id="apps-rk-list"></div>
+    </details>
+
+    <details class="pv-d" id="disc-system-tiles">
+      <summary><span data-t="apps.tiles">Hide home screen system apps</span> <span class="cur" id="apps-tiles-summary"></span></summary>
+      <div class="pv-note" data-glasshouse-home-note hidden><span data-t="apps.glasshouseHomeTilesNote">Glasshouse Home is switched on. Apps hidden here are hidden on it too; the Home tab hides others on Glasshouse Home only.</span> <a href="?tab=home" onclick="event.preventDefault(); showTab('home')" data-t="apps.glasshouseHomeLink">Arrange Glasshouse Home</a></div>
+      <div class="pv-sub" data-t="apps.tiles.desc">Hide built-in LG apps (Gallery, Music, Sports, Always Ready, Alexa, etc.) from the TV's home launcher ribbon.</div>
+      <div class="btns" style="margin-top:14px;max-width:520px">
+        <button type="button" id="tile-hiding-off" onclick="setTileHiding(false)" data-t="apps.tiles.off">Off (Stock)</button>
+        <button type="button" id="tile-hiding-on" onclick="setTileHiding(true)" data-t="apps.tiles.on">On (Custom)</button>
+      </div>
+      <div class="sub" id="apps-hidden-count" style="margin-top:8px">&mdash;</div>
+      <div class="pv-note" id="tile-hiding-overridden" style="margin-top:12px" hidden data-t="common.heldOverridden">Turned back on with allowOnWebos10 in config.json. On webOS 10 and later custom screen savers and tile hiding have left the picture, the sound and HDMI control off until the TV was unplugged.</div>
+      <div class="pv-note" id="tile-hiding-held" style="margin-top:12px" hidden data-t="apps.tiles.held">Hiding system apps is turned off on this TV for now. On webOS 10 and later it can leave the picture, the sound and HDMI control off until the TV is unplugged. Apps already hidden come back after the TV is next fully restarted.</div>
+      <div class="pv-note" id="tile-hiding-warning" style="margin-top:12px" hidden><b data-t="apps.tiles.warn.lead">When enabled:</b> <span data-t="apps.tiles.warn">On each cold boot of your TV, this can cause a brief 1-second blank screen or input refresh before returning to your active HDMI source.</span></div>
+      <div id="apps-tiles-list" style="margin-top:16px">
+        <div class="sub" style="padding:16px 0" data-t="apps.loadingSystem">Loading system apps&hellip;</div>
+      </div>
+    </details>
+  </div>
+
+  <div class="apps-grp" id="apps-grp-bg">
+    <div class="apps-grp-h" data-t="apps.group.bg">Background</div>
+    <div class="pv-sub apps-grp-d" data-t="apps.group.bg.desc">What the TV runs without being asked. Switching some of it off frees memory.</div>
+
+    <details class="pv-d" id="disc-preload" hidden>
+      <summary><span data-t="apps.preload">Apps kept ready in the background</span> <span class="cur" id="apps-preload-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.preload.desc">LG keeps these apps loaded in the background so they open
+        faster, including ones that are never used, and each takes up memory. An app switched off frees its
+        memory once it is next closed or the TV restarts, and takes a few seconds longer to open.</div>
+      <div id="apps-preload-list" style="margin-top:16px"></div>
+    </details>
+
+    <details class="pv-d" id="disc-system-services" hidden>
+      <summary><span data-t="apps.services">Turn off background services</span> <span class="cur" id="apps-services-summary"></span></summary>
+      <div class="pv-sub" data-t="apps.services.desc">Non-essential background services discovered on this TV. Disable unnecessary services to reduce memory usage, eliminate background telemetry, and speed up boot times.</div>
+      <div class="prot-table" id="apps-services-list">
+        <div class="sub" style="padding:16px 0" data-t="apps.loadingServices">Loading background services&hellip;</div>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section class="priv panel" id="homepane" role="tabpanel" hidden>
+  <div class="pv-note warn" data-t="home.experimental">Experimental. Glasshouse Home replaces LG's Home screen with Glasshouse's own. It has been tried on webOS 9 only. In the first half minute after the TV starts from cold, Home shows a message that Glasshouse Home is starting.</div>
+  <div class="prot-table">
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" id="home-state">&mdash;</div>
+        <div class="prot-desc" id="home-state-desc"></div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="home-switch" onclick="homeSwitch()">&mdash;</button></div>
+    </div>
+    <div class="prot-row" id="home-hide-lg-row" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="home.hideLg">Hide LG’s Home while the TV starts</div>
+        <div class="prot-desc" data-t="home.hideLgDesc">For about 25 seconds after a cold start, until Glasshouse Home takes its place, LG’s Home opens as a black screen instead of its own. If Glasshouse stops running, for example after a firmware update removes root, LG’s Home stays black until it is put back over SSH.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="home-hide-lg" onclick="homeHideLg()">&mdash;</button></div>
+    </div>
+    <div class="prot-row" id="home-picture-row" hidden>
+      <div class="prot-main">
+        <div class="prot-title" data-t="home.picture">Picture details</div>
+        <div class="prot-desc" data-t="home.pictureDesc">In the top right of Glasshouse Home: the resolution, refresh rate and HDR of what was last on, and the picture mode and brightness it gets.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="home-picture" onclick="homePicture()">&mdash;</button></div>
+    </div>
+  </div>
+
+  <div id="home-more">
+  <div class="grp grp-sec" data-t="home.layout">Rows and tiles</div>
+  <div class="sub" data-t="home.layoutDesc">Apps and inputs come from the TV: hide the ones not wanted. Channels are only the ones added here. Holding OK on Glasshouse Home arranges the same layout on the TV.</div>
+  <div class="pv-note" id="home-history-note" hidden data-t="home.historyNote">Apps are in LG's order. With History switched on in Advanced, new apps are placed by how much each is used.</div>
+  <div id="home-rows"></div>
+  <div class="btns" style="max-width:240px"><button type="button" id="home-reset" onclick="homeResetLayout()" data-t="home.reset">Reset the layout</button></div>
+  <div class="sub" data-t="home.resetDesc">The rows, apps and inputs go back to their first order, with LG’s promotions hidden again. Channels stay as they are.</div>
+
+  <div class="grp grp-sec" data-t="home.colours.title">Colours</div>
+  <div class="sub" data-t="home.colours.desc">The text on Glasshouse Home, and the accent that frames the chosen tile and marks what was last on. The quieter text is a shade of the text colour.</div>
+  <div class="home-looks" id="home-looks"></div>
+  <div class="home-custom">
+    <label><input type="color" id="home-col-text" onchange="homeCustomColours()"> <span data-t="home.colours.text">Text</span></label>
+    <label><input type="color" id="home-col-accent" onchange="homeCustomColours()"> <span data-t="home.colours.accent">Accent</span></label>
+    <button type="button" id="home-col-reset" onclick="homeSaveLayout({ colours: null })" data-t="home.colours.reset">Use the default colours</button>
+  </div>
+
+  <div class="grp grp-sec" data-t="home.wall.title">Wallpaper</div>
+  <div class="sub" data-t="home.wall.optional">Optional: upload an image for each time of day. A time of day without one has a black background.</div>
+  <div class="home-upload">
+    <label for="home-wall-slot" data-t="home.wall.slot">Time of day</label>
+    <select id="home-wall-slot" class="pill-sel">
+      <option value="morning" data-t="home.wall.slotMorning">Morning</option>
+      <option value="afternoon" data-t="home.wall.slotAfternoon">Afternoon</option>
+      <option value="evening" data-t="home.wall.slotEvening">Evening</option>
+      <option value="night" data-t="home.wall.slotNight">Night</option>
+    </select>
+    <input id="home-wall-file" type="file" accept="image/jpeg,image/png,image/webp" onchange="renderHomeWalls()" aria-label="Choose a wallpaper image" data-t-aria-label="home.wall.chooseFile">
+    <button type="button" id="home-wall-upload" onclick="homeUploadWall()" disabled></button>
+    <button type="button" id="home-wall-clear" onclick="homeClearUploads()" data-t="home.wall.clear">Remove uploaded images</button>
+  </div>
+  <div class="sub" data-t="home.wall.uploadHelp">JPEG, PNG or WebP, up to 25 MB. Images are resized to fit 1920 × 1080, the size Glasshouse Home is drawn at, before upload, and fill the screen.</div>
+  <div class="sub" id="home-wall-upload-note" role="status"></div>
+  <div class="home-walls" id="home-walls"></div>
+  </div>
+</section>
+
+<section class="priv panel" id="privpane" role="tabpanel" hidden>
+  <div class="lbl" data-t="pv.heading">Privacy &amp; data collection</div>
+
+  <div class="pv-sec" data-t="pv.overview">Overview</div>
+  <div class="ps" id="ps">
+    <div class="ps-state">
+      <span class="ps-dot" id="ps-dot"></span>
+      <div>
+        <div class="ps-head" id="ps-head">&mdash;</div>
+        <div class="pv-sub" id="ps-sub" style="margin-bottom:0;max-width:none"></div>
+      </div>
+    </div>
+    <div class="pv-list" id="ps-areas"></div>
+    <div class="btns" style="max-width:520px;margin-top:18px">
+      <button type="button" id="ps-go" onclick="switchAllOff()">&mdash;</button>
+    </div>
+    <div class="sub" id="ps-msg" style="margin-top:12px"></div>
+    <div class="pv-note" id="ps-keep" hidden></div>
+  </div>
+
+  <details class="pv-d" id="pv-adv">
+  <summary><span data-t="tab.advanced">Advanced</span> <span class="cur" data-t="pv.advanced.sub">Every setting, one by one</span></summary>
+
+  <div class="pv-top">
+    <div>
+      <div class="pv-h" data-t="pv.adblock">Ad &amp; telemetry blocker</div>
+      <div class="pv-sub" data-t="pv.adblock.desc">Stops the TV reaching LG's ad, tracking and diagnostics servers.</div>
+      <div class="btns" style="max-width:520px">
+        <button id="ab-off" onclick="setAdBlockMode('off')" data-t="common.off">Off</button>
+        <button id="ab-ads" onclick="setAdBlockMode('ads')" data-t="pv.adblock.ads">Ads &amp; telemetry</button>
+        <button id="ab-full" onclick="setAdBlockMode('full')" data-t="pv.adblock.full">Everything</button>
+      </div>
+      <div class="sub" id="adblock-detail" style="margin-top:12px">&mdash;</div>
+      <div class="pv-note" id="adblock-reconnect" hidden data-t="pv.adblock.reconnect">LG's apps, such as the Content Store and LG Channels, can take about a minute to connect again. If one shows an error, exit it and open it again after a minute.</div>
+      <div class="pv-note warn" id="adblock-help" hidden data-t="pv.adblock.troubleshoot">If an app or one of LG's
+        services stops working while the blocker is on, switch it off to check whether it is the cause.</div>
+      <div class="pv-note warn"><b data-t="pv.adblock.full.warn">Everything also blocks LG's platform services, so
+        the LG ThinQ app can no longer control the TV, and the app store, software updates and LG
+        Channels may stop working.</b> <span data-t="pv.adblock.full.updates">To stop only system updates, use Block TV software
+        updates in the Advanced tab.</span></div>
+    </div>
+
+    <div>
+      <div class="pv-h" data-t="pv.adid">Advertising identifier</div>
+      <div class="pv-sub" data-t="pv.adid.desc">A unique ID your TV hands to advertisers so they can recognise it and
+        target ads at you. Resetting it breaks the link to any profile built from past activity.</div>
+      <div id="pv-adid"></div>
+      <div id="pv-lmt"></div>
+      <div class="sub" id="pv-adnote" style="margin-top:8px"></div>
+      <div class="btns" style="margin-top:14px;max-width:520px">
+        <button id="adid-reset" onclick="privAction('resetAdId')" data-t="pv.adid.reset">Reset advertising ID</button>
+        <button id="adcookies-clear" onclick="privAction('clearAdCookies')" data-t="pv.cookies.clear">Clear ad cookies</button>
+      </div>
+    </div>
+  </div>
+
+  <details class="pv-d" id="pv-promo-d" hidden>
+  <summary><span data-t="pv.promotions">LG ads and promotions</span> <span class="cur" id="pv-promo-cur"></span></summary>
+  <div class="prot-table" id="pv-promo"></div>
+  </details>
+
+  <details class="pv-d">
+  <summary><span data-t="pv.consent">What LG is allowed to collect</span> <span class="cur" id="pv-consent-cur"></span></summary>
+  <div class="pv-sub"><span data-t="pv.consent.desc">These are the agreements recorded on the TV.</span>
+    <b data-t="pv.consent.private">Off is the private setting.</b></div>
+  <div id="pv-consent" class="pv-list"></div>
+  <div class="pv-note" id="pv-consent-note"></div>
+  </details>
+
+  <details class="pv-d">
+  <summary><span data-t="pv.runningNow">What&rsquo;s running now</span> <span class="cur" id="pv-running-cur"></span></summary>
+  <div class="pv-sub" data-t="pv.runningNow.desc">What LG's collection machinery is doing at this moment, which is a
+    separate question from what it is permitted to collect.</div>
+  <!-- The feature and the process behind it are different questions: ACR can
+       report "not running" while acr2 is alive, which read as a contradiction
+       when the two sat in one list. -->
+  <div class="pv-list">
+    <div class="pv-grp"><div class="pv-g"><span data-t="pv.recognition">Recognition</span></div><div id="pv-live"></div></div>
+    <div class="pv-grp"><div class="pv-g"><span data-t="pv.diagnostics">Diagnostics services</span></div><div id="pv-daemons"></div></div>
+    <div class="pv-grp" id="pv-mic-grp" hidden><div class="pv-g"><span data-t="pv.microphone">Microphone</span></div><div id="pv-mic"></div></div>
+  </div>
+  <div class="pv-note" id="pv-running-note"></div>
+  </details>
+  <details class="pv-d" id="disc-adblock-custom">
+  <summary><span data-t="pv.adblock.custom">Custom ad blocking</span> <span class="cur" id="abc-summary"></span></summary>
+  <div class="pv-sub" data-t="pv.adblock.custom.desc">Use your own hosts file to customise what the ad blocker blocks.
+    The TV keeps the list, so it is not uploaded again after a Glasshouse update.</div>
+  <div class="oled-warn abc-warn" data-t="pv.adblock.custom.warn">Depending on what it blocks, a list can stop apps, LG's
+    services or software updates working. If something stops working, switch Block its names off to check.</div>
+  <div class="prot-table abc-table">
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="pv.adblock.custom.file">Hosts file</div>
+        <div class="prot-desc" id="abc-list">&mdash;</div>
+      </div>
+      <div class="prot-status abc-list-btns">
+        <button type="button" class="pill idle" id="abc-upload" onclick="q('abc-file').click()">&mdash;</button>
+        <button type="button" class="pill idle" id="abc-clear" onclick="clearCustomHosts()" hidden data-t="pv.adblock.custom.delete">Delete</button>
+      </div>
+    </div>
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="pv.adblock.custom.use">Block its names</div>
+        <div class="prot-desc" data-t="pv.adblock.custom.use.desc">Off keeps the file on the TV but blocks nothing in it.</div>
+      </div>
+      <div class="prot-status"><button type="button" class="pill idle" id="abc-enabled" onclick="toggleCustomHosts()">&mdash;</button></div>
+    </div>
+    <div class="prot-row">
+      <div class="prot-main">
+        <div class="prot-title" data-t="pv.adblock.custom.how">What is blocked</div>
+        <div class="prot-desc" data-t="pv.adblock.custom.how.desc">Glasshouse's list is the one the ad blocker uses on its own.</div>
+      </div>
+      <div class="prot-status"><select class="pill-sel" id="abc-mode" onchange="setCustomHostsMode(this.value)"
+        aria-label="What is blocked" data-t-aria-label="pv.adblock.custom.how">
+        <option value="add" data-t="pv.adblock.custom.add">Your file and Glasshouse's list</option>
+        <option value="replace" data-t="pv.adblock.custom.replace">Only your file</option>
+      </select></div>
+    </div>
+  </div>
+  <input type="file" id="abc-file" accept=".txt,.hosts,text/plain" hidden onchange="uploadCustomHosts(this)">
+  <div class="sub" id="abc-detail" role="status" aria-live="polite"></div>
+  </details>
+  </details>
+</section>
+
+<section class="priv panel" id="mqttpane" role="tabpanel" hidden>
+  <div class="lbl" translate="no">MQTT &amp; Home Assistant</div>
+
+  <div class="cfg-cols">
+  <div class="cfg-side">
+    <div class="cfg-toggles" style="margin-top:0">
+      <button id="cfg-enabled" onclick="cfgToggle('cfg-enabled')" data-t="mqtt.bridge">MQTT bridge</button>
+    </div>
+    <div class="sub" id="cfg-enabled-note" style="margin-top:8px"></div>
+
+    <div class="mqtt-net" id="mqtt-net">
+      <div class="mqtt-net-header">
+        <span class="mqtt-net-title" data-t="mqtt.net.title">Connection</span>
+      </div>
+
+      <div class="mqtt-net-flow">
+        <div class="mqtt-net-node" id="mqtt-node-tv">
+          <div class="mqtt-net-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 20h8M12 17v3"/></svg>
+          </div>
+          <div class="mqtt-net-body">
+            <div class="mqtt-net-name" id="mqtt-node-tv-name">&mdash;</div>
+            <div class="mqtt-net-sub" translate="no">Glasshouse</div>
+          </div>
+          <div class="mqtt-net-state">
+            <span class="mqtt-dot good" id="mqtt-dot-tv"></span>
+          </div>
+        </div>
+
+        <div class="mqtt-net-link" id="mqtt-link-tv-broker">
+          <div class="mqtt-net-track">
+            <div class="mqtt-packet" id="mqtt-packet-pub"></div>
+          </div>
+          <div class="mqtt-net-meta">
+            <span class="mqtt-net-metric" id="mqtt-net-last-pub">&mdash;</span>
+          </div>
+        </div>
+
+        <div class="mqtt-net-node" id="mqtt-node-broker">
+          <div class="mqtt-net-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M8 11l8-4M8 13l8 4"/></svg>
+          </div>
+          <div class="mqtt-net-body">
+            <div class="mqtt-net-name" id="mqtt-node-broker-name">&mdash;</div>
+            <div class="mqtt-net-sub"><span id="mqtt-node-broker-sub">&mdash;</span><span class="mqtt-tls-tag" id="mqtt-node-broker-tls" hidden translate="no">TLS</span></div>
+          </div>
+          <div class="mqtt-net-state">
+            <span class="mqtt-dot idle" id="mqtt-dot-broker"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cfg-main">
+  <div class="pv-h" style="margin-top:0" data-t="mqtt.broker">Broker</div>
+  <div class="pv-sub" data-t="mqtt.broker.desc">Where this TV publishes its telemetry. Home Assistant picks the
+    entities up automatically once the broker is reachable.</div>
+
+  <div class="cfg-grid">
+    <div class="cfg-f">
+      <label for="cfg-host" data-t="mqtt.host">Broker address</label>
+      <input type="text" id="cfg-host" placeholder="192.168.1.10" translate="no" autocomplete="off" spellcheck="false">
+      <div class="hint" data-t="mqtt.host.hint">Hostname or IP of the MQTT broker.</div>
+    </div>
+    <div class="cfg-f">
+      <label for="cfg-port" data-t="mqtt.port">Port</label>
+      <input type="number" id="cfg-port" placeholder="auto" data-t-placeholder="mqtt.port.auto" min="1" max="65535" autocomplete="off">
+      <div class="hint" data-t="mqtt.port.hint">Left blank: 1883, or 8883 with TLS.</div>
+    </div>
+    <div class="cfg-f">
+      <label for="cfg-user" data-t="mqtt.user">Username</label>
+      <input type="text" id="cfg-user" autocomplete="off" spellcheck="false">
+      <div class="hint" data-t="mqtt.user.hint">Blank for an anonymous broker.</div>
+    </div>
+    <div class="cfg-f">
+      <label for="cfg-pass" data-t="mqtt.password">Password</label>
+      <input type="password" id="cfg-pass" autocomplete="new-password">
+      <div class="hint" id="cfg-pass-hint"></div>
+    </div>
+  </div>
+
+  <div class="cfg-toggles">
+    <button id="cfg-tls" onclick="cfgToggle('cfg-tls')" translate="no">TLS</button>
+    <button id="cfg-verify" onclick="cfgToggle('cfg-verify')" data-t="mqtt.verify">Verify certificate</button>
+  </div>
+  <div class="pv-note" data-t="mqtt.tls.note">Without TLS the username and password cross the network in
+    cleartext. The config file is readable by anything with root on this TV, so use a
+    broker account restricted to these topics rather than a shared one.</div>
+
+  <div class="pv-h" data-t="mqtt.topics">Topics &amp; identity</div>
+  <div class="pv-sub" data-t="mqtt.topics.desc">Changing the device ID orphans any entities Home Assistant has
+    already created &mdash; it appears as a second device rather than renaming the first.</div>
+
+  <div class="cfg-grid">
+    <div class="cfg-f">
+      <label for="cfg-prefix" data-t="mqtt.prefix">Topic prefix</label>
+      <input type="text" id="cfg-prefix" placeholder="lgtv" translate="no" autocomplete="off" spellcheck="false">
+      <div class="hint" data-t="mqtt.prefix.hint">Must differ per TV. Telemetry goes to this prefix followed by /telemetry.</div>
+    </div>
+    <div class="cfg-f">
+      <label for="cfg-disc" data-t="mqtt.discovery">Discovery prefix</label>
+      <input type="text" id="cfg-disc" placeholder="homeassistant" translate="no" autocomplete="off" spellcheck="false">
+      <div class="hint" data-t="mqtt.discovery.hint">Only change if Home Assistant was reconfigured.</div>
+    </div>
+    <div class="cfg-f">
+      <label for="cfg-devid" data-t="mqtt.deviceId">Device ID</label>
+      <input type="text" id="cfg-devid" placeholder="lg_tv" translate="no" autocomplete="off" spellcheck="false">
+      <div class="hint" data-t="mqtt.deviceId.hint">Lowercase letters, digits and underscores.</div>
+    </div>
+    <div class="cfg-f">
+      <label for="cfg-devname" data-t="mqtt.deviceName">Device name</label>
+      <input type="text" id="cfg-devname" placeholder="LG OLED TV" data-t-placeholder="header.brand.oled" autocomplete="off">
+      <div class="hint" data-t="mqtt.deviceName.hint">Shown as the device name in Home Assistant.</div>
+    </div>
+    <div class="cfg-f">
+      <label for="cfg-interval" data-t="mqtt.interval">Telemetry interval</label>
+      <input type="number" id="cfg-interval" placeholder="10000" translate="no" min="1000" max="600000" autocomplete="off">
+      <div class="hint" data-t="mqtt.interval.hint">Milliseconds between publishes.</div>
+    </div>
+  </div>
+
+  <div class="pv-h" data-t="mqtt.icons">App icons</div>
+  <div class="pv-table">
+    <div class="pv-row">
+      <div>
+        <div class="n" data-t="mqtt.icons.toggle">Share app icons</div>
+        <div class="d" data-t="mqtt.icons.desc">Lets a launcher or dashboard on another device show this TV's apps with their own
+          icons. Launch App in Home Assistant then lists each icon's address. Anyone on the network can
+          fetch the icons, and so tell which apps are installed.</div>
+      </div>
+      <button type="button" class="pill idle" id="cfg-icons" onclick="cfgToggleIcons()">&mdash;</button>
+    </div>
+  </div>
+
+  <div class="pv-h" data-t="mqtt.entities">Home Assistant entities</div>
+  <div class="pv-sub" data-t="mqtt.entities.desc">Choose which entity categories are published over MQTT Discovery.
+    Disabling an entity removes it cleanly from Home Assistant without leaving an orphaned state.</div>
+
+  <div class="pv-table" id="cfg-ents"></div>
+
+  <details class="pv-d" id="cfg-fine" style="margin-top:16px">
+    <summary>
+      <span data-t="mqtt.fineTune">Fine-tune individual entities</span>
+      <span class="cur" id="cfg-fine-count">&mdash;</span>
+    </summary>
+    <div id="cfg-subents" style="padding:10px 0 20px"></div>
+  </details>
+
+  <div class="cfg-save">
+    <button id="cfg-save-btn" onclick="saveSettings()" data-t="mqtt.save">Save &amp; restart</button>
+    <span class="cfg-msg" id="cfg-msg"></span>
+  </div>
+  </div>
+  </div>
+</section>
+
+<section class="priv panel" id="serverpane" role="tabpanel" hidden>
+  <div class="upd">
+    <div class="pv-sec" data-t="server.glasshouse" translate="no">Glasshouse</div>
+    <div class="prot-table">
+      <div class="prot-row">
+        <div class="prot-main">
+          <div class="prot-title" id="upd-title">&mdash;</div>
+          <div class="prot-desc" id="upd-desc" hidden></div>
+          <div class="upd-new" id="upd-new" hidden></div>
+          <div class="upd-btns" id="upd-btns">
+            <button type="button" class="pill idle" id="upd-check" onclick="checkNow()" data-t="server.checkNow">Check now</button>
+            <button type="button" class="pill warn" id="upd-install" hidden onclick="installUpdate()"></button>
+          </div>
+          <div class="upd-prog" id="upd-prog" hidden>
+            <div class="upd-step" id="upd-step"></div>
+            <div class="track"><b id="upd-bar"></b></div>
+          </div>
+          <div class="sub" id="upd-msg"></div>
+          <button type="button" class="link-btn" id="upd-rollback" hidden onclick="rollbackUpdate()"></button>
+        </div>
+        <div class="prot-status"><span class="pill idle" id="upd-pill">&mdash;</span></div>
+      </div>
+      <div class="prot-row" id="server-health-row">
+        <div class="prot-main">
+          <div class="prot-title" data-t="server.health.title">Server health</div>
+          <div class="prot-desc" data-t="server.health.desc">Memory footprint and uptime of the Glasshouse background process on this TV.</div>
+        </div>
+        <div class="prot-status" id="server-health-status">
+          <span class="app-badge" id="server-badge-mem" hidden></span>
+          <span class="app-badge" id="server-badge-uptime" hidden></span>
+        </div>
+      </div>
+      <div class="prot-row">
+        <div class="prot-main">
+          <div class="prot-title" data-t="server.checkDaily">Check for updates daily</div>
+          <div class="prot-desc" data-t="server.checkDaily.desc">Looks for a new release once a day.</div>
+        </div>
+        <div class="prot-status"><button type="button" class="pill idle" id="upd-auto" onclick="toggleAutoCheck()">&mdash;</button></div>
+      </div>
+      <div class="prot-row">
+        <div class="prot-main">
+          <div class="prot-title" data-t="server.updatePopup">Update pop-up</div>
+          <div class="prot-desc" data-t="server.updatePopup.desc">Shows a pop-up in this browser when a newer version is out, with a button to install it. Off until switched on here.</div>
+        </div>
+        <div class="prot-status"><button type="button" class="pill idle" id="upd-popup" onclick="toggleUpdatePopup()">&mdash;</button></div>
+      </div>
+      <div class="prot-row">
+        <div class="prot-main">
+          <div class="prot-title" data-t="server.watch.title">Watch time</div>
+          <div class="prot-desc" data-t="server.watch.desc">Counts how long the screen is on, per app and input, for the Metrics tab and Home Assistant. Kept on the TV for 13 months. It records what the household watches, so it stays off until turned on here.</div>
+          <button type="button" class="link-btn" id="srv-watch-clear" hidden onclick="clearWatchTime()" data-t="server.watch.clear">Clear history</button>
+        </div>
+        <div class="prot-status"><button type="button" class="pill idle" id="srv-watch" onclick="toggleWatchTime()">&mdash;</button></div>
+      </div>
+      <div class="prot-row">
+        <div class="prot-main">
+          <div class="prot-title" data-t="server.backup.title">Settings backup</div>
+          <div class="prot-desc" data-t="server.backup.desc">Saves LG's sound, device, HDMI and ad settings, and Glasshouse's own, to a file. Restoring it, on this TV or another, sets those the TV has. Network access, MQTT and game settings are not included.</div>
+          <div class="btns backup-btns">
+            <button type="button" id="backup-save" onclick="saveBackup()" data-t="server.backup.save">Download backup</button>
+            <button type="button" id="backup-restore" onclick="q('backup-file').click()" data-t="server.backup.restore">Restore from file</button>
+          </div>
+          <input type="file" id="backup-file" accept=".json,application/json" hidden onchange="restoreBackup(this)">
+          <div class="sub" id="backup-msg" hidden></div>
+        </div>
+      </div>
+      <div class="prot-row" id="backup-daily-row">
+        <div class="prot-main">
+          <div class="prot-title" data-t="server.backup.daily">Daily backup</div>
+          <div class="prot-desc" data-t="server.backup.daily.desc">Saves the same backup on the TV once a day, and keeps the last 7. Each can be downloaded or restored here.</div>
+        </div>
+        <div class="prot-status"><button type="button" class="pill idle" id="backup-daily" onclick="toggleBackupDaily()">&mdash;</button></div>
+        <div class="backup-saved" id="backup-saved" hidden></div>
+      </div>
+      <!-- Hidden where the TV will not take the app; renderTvApp shows it. -->
+      <div class="prot-row" id="tvapp-row" hidden>
+        <div class="prot-main">
+          <div class="prot-title" data-t="server.tvApp.title">App on the TV's home screen</div>
+          <div class="prot-desc" id="tvapp-desc"></div>
+        </div>
+        <div class="prot-status"><button type="button" class="pill idle" id="tvapp-btn" onclick="toggleTvApp()">&mdash;</button></div>
+      </div>
+    </div>
+
+    <details class="pv-d srv-adv" id="srv-adv">
+      <summary><span data-t="server.advanced">Advanced</span> <span class="cur" data-t="server.advanced.cur">For developers and home-lab setups</span></summary>
+      <div class="pv-sub" data-t="server.advanced.desc">Nothing here needs changing for everyday use.</div>
+      <div class="prot-table">
+        <div class="prot-row">
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.ntp.title">Set the clock from a time server</div>
+            <div class="prot-desc" data-t="server.ntp.short">For a network that runs its own time server, such as some routers and NAS boxes. The TV then no longer needs LG's time servers, which the ad blocker's Everything setting blocks.</div>
+            <form class="toast-form" id="ntp-form" hidden onsubmit="event.preventDefault();saveNtpServer();">
+              <input type="text" id="ntp-server" placeholder="Time server, such as 192.168.1.1" data-t-placeholder="server.ntp.placeholder"
+                maxlength="260" autocomplete="off" spellcheck="false" aria-label="Time server" data-t-aria-label="server.ntp.server"
+                oninput="this.dataset.dirty='1'">
+              <button type="submit" id="ntp-save" data-t="server.ntp.save">Save</button>
+            </form>
+            <div class="prot-desc" id="ntp-status" style="margin-top:8px" hidden></div>
+          </div>
+          <div class="prot-status"><button type="button" class="pill idle" id="ntp-toggle" onclick="toggleNtp()">&mdash;</button></div>
+        </div>
+        <div class="prot-row">
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.port.title">Dashboard port</div>
+            <div class="prot-desc" data-t="server.port.short">The port this dashboard answers on, 8080 unless changed. Change it if another app on the TV needs 8080, such as Stremio. Saving restarts the server, and this page follows to the new address.</div>
+            <form class="toast-form" id="port-form" onsubmit="event.preventDefault();saveDashboardPort();">
+              <input type="text" id="port-input" inputmode="numeric" maxlength="5" placeholder="8080"
+                autocomplete="off" aria-label="Dashboard port" data-t-aria-label="server.port.input"
+                oninput="this.dataset.dirty='1'">
+              <button type="submit" id="port-save" data-t="server.port.save">Save</button>
+            </form>
+            <div class="prot-desc row-err" id="port-status" style="margin-top:8px" hidden></div>
+          </div>
+        </div>
+        <div class="prot-row">
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.prometheus.short.title">Prometheus metrics</div>
+            <div class="prot-desc" data-t="server.prometheus.short">Lets a Prometheus server on the network collect the TV's readings, at /api/prometheus/metrics. While off, the address does not exist.</div>
+          </div>
+          <div class="prot-status"><button type="button" class="pill idle" id="srv-prometheus" onclick="togglePrometheus()">&mdash;</button></div>
+        </div>
+        <div class="prot-row">
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.devtools.short.title">Web app debugger</div>
+            <div class="prot-desc" data-t="server.devtools.short">In Developer Mode, lets developer tools on the network inspect the TV's web apps without an SSH tunnel. webOS leaves it open with no password, so keep it closed unless it is needed.</div>
+            <div class="prot-desc" id="srv-devtools-nofw" hidden data-t="server.devtools.noFirewall">This TV has no firewall, so the debugger stays open to the network while Developer Mode is on.</div>
+          </div>
+          <div class="prot-status"><button type="button" class="pill idle" id="srv-devtools" onclick="toggleNetworkDebugger()">&mdash;</button></div>
+        </div>
+        <div class="prot-row" id="ssh-row">
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.ssh.title">SSH keys</div>
+            <div class="prot-desc" data-t="server.ssh.desc">The public keys that can log in to the TV as root over SSH. While any key file is there, the Homebrew Channel leaves root without a password, so only these keys get in.</div>
+            <div class="prot-desc" id="ssh-state"></div>
+            <div class="prot-desc" id="ssh-token" hidden data-t="server.ssh.needsToken">Changing these needs a token set in config.json. Without one, anyone on the network could add their own key.</div>
+          </div>
+          <div class="ssh-body">
+            <div id="ssh-keys"></div>
+            <form class="toast-form" onsubmit="event.preventDefault();addSshKey();">
+              <input type="text" id="ssh-new" placeholder="ssh-ed25519 AAAA… user@host" translate="no" maxlength="16384" autocomplete="off" spellcheck="false"
+                aria-label="Public key to add" data-t-aria-label="server.ssh.newKey">
+              <button type="submit" id="ssh-add" data-t="server.ssh.add">Add key</button>
+            </form>
+            <div class="btns ssh-btns">
+              <button type="button" id="ssh-reboot" hidden onclick="powerAction('reboot')" data-t="server.ssh.reboot">Reboot now</button>
+              <button type="button" class="link-btn" id="ssh-delete" hidden onclick="deleteSshKeys()" data-t="server.ssh.delete">Delete the key file</button>
+            </div>
+            <div class="sub" id="ssh-msg" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pv-g" data-t="server.experimental">Experimental features</div>
+      <div class="prot-table">
+        <div class="prot-row">
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.experimental.tileHiding">Home screen tile hiding</div>
+            <div class="prot-desc" data-t="server.experimental.tileHiding.short">Allows hiding built-in apps from the Home screen, on the Apps tab.</div>
+            <div class="prot-desc" data-t="server.experimental.tileHiding.warn">On some TVs this has left the picture or sound off until the TV was unplugged. On webOS 10 and later, multiple issues have been reported including black screen and stuck picture settings.</div>
+          </div>
+          <div class="prot-status"><button type="button" class="pill idle" id="exp-tilehiding" onclick="toggleExpTileHiding()">&mdash;</button></div>
+        </div>
+        <div class="prot-row" id="exp-homelayout-row" hidden>
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.experimental.homeLayout">Home screen layout (webOS 10)</div>
+            <div class="prot-desc" data-t="server.experimental.homeLayout.short">Allows switching off parts of LG&rsquo;s Home screen on webOS 10, on the Apps tab.</div>
+          </div>
+          <div class="prot-status"><button type="button" class="pill idle" id="exp-homelayout" onclick="toggleHomeLayoutAllowed('exp-homelayout')">&mdash;</button></div>
+        </div>
+        <div class="prot-row" id="exp-screensaver-row" hidden>
+          <div class="prot-main">
+            <div class="prot-title" data-t="server.experimental.screensaver">Custom screen savers (webOS 12+)</div>
+            <div class="prot-desc" data-t="server.experimental.screensaver.short">Allows the dashboard's own screen savers on webOS 12 and later, on the Screensaver tab.</div>
+          </div>
+          <div class="prot-status"><button type="button" class="pill idle" id="exp-screensaver" onclick="toggleExpScreensaver()">&mdash;</button></div>
+        </div>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section class="panel" id="toolspane" role="tabpanel" hidden>
+  <div class="pv-sec" data-t="tools.title">System logs</div>
+  <div class="pv-sub" data-t="tools.desc">Logs from the TV, Glasshouse and the TV's hardware, for troubleshooting.</div>
+  <div class="pv-sub" id="tools-fwd" hidden></div>
+
+  <div class="tools-toolbar">
+    <div class="tools-toolbar-grp">
+      <span class="tools-toolbar-lbl" data-t="tools.sources">Sources</span>
+      <div class="tools-seg" role="group">
+        <button type="button" class="tools-src-btn on active" data-src="system" aria-pressed="true" onclick="toggleToolsSource('system')">
+          <span class="src-dot src-system"></span><span data-t="tools.src.system">System</span>
+        </button>
+        <button type="button" class="tools-src-btn on active" data-src="glasshouse" aria-pressed="true" onclick="toggleToolsSource('glasshouse')">
+          <span class="src-dot src-glasshouse"></span><span data-t="tools.src.glasshouse">Glasshouse</span>
+        </button>
+        <button type="button" class="tools-src-btn" data-src="kernel" aria-pressed="false" onclick="toggleToolsSource('kernel')">
+          <span class="src-dot src-kernel"></span><span data-t="tools.src.kernel">Kernel</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="tools-toolbar-grp">
+      <span class="tools-toolbar-lbl" data-t="tools.level">Level</span>
+      <div class="tools-seg" role="group">
+        <button type="button" class="tools-lvl-btn on active" data-level="all" onclick="setToolsLevelFilter('all')" data-t="tools.lvl.all">All</button>
+        <button type="button" class="tools-lvl-btn" data-level="error" onclick="setToolsLevelFilter('error')"><span data-t="tools.lvl.errors">Errors</span><span class="tools-cnt" id="tools-cnt-errors"></span></button>
+        <button type="button" class="tools-lvl-btn" data-level="warning" onclick="setToolsLevelFilter('warning')"><span data-t="tools.lvl.warnings">Warnings</span><span class="tools-cnt" id="tools-cnt-warnings"></span></button>
+        <button type="button" class="tools-lvl-btn" data-level="info" onclick="setToolsLevelFilter('info')" data-t="tools.lvl.info">Info</button>
+      </div>
+    </div>
+
+    <div class="tools-toolbar-grp">
+      <span class="tools-toolbar-lbl" data-t="tools.limit">Lines</span>
+      <div class="tools-seg" role="group">
+        <button type="button" class="tools-lim-btn on active" data-limit="100" onclick="setToolsLimit(100)">100</button>
+        <button type="button" class="tools-lim-btn" data-limit="500" onclick="setToolsLimit(500)">500</button>
+        <button type="button" class="tools-lim-btn" data-limit="1000" onclick="setToolsLimit(1000)">1000</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tools-subbar">
+    <div class="tools-search-wrap">
+      <svg class="tools-search-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <input type="text" id="tools-search-input" class="tools-search-input" placeholder="Filter log text or process..." data-t-placeholder="tools.searchPlaceholder" autocomplete="off" spellcheck="false" oninput="onToolsSearchInput(this.value)">
+      <button type="button" id="tools-search-clear" class="tools-search-clear" onclick="clearToolsSearch()" hidden aria-label="Clear search" data-t-aria-label="tools.clearSearch">&times;</button>
+    </div>
+
+    <div class="tools-actions">
+      <div class="tools-switches">
+        <button type="button" class="tools-switch on" id="tools-live-btn" aria-pressed="true" onclick="toggleToolsLive()">
+          <span class="live-dot" id="tools-live-dot"></span><span id="tools-live-text" data-t="tools.live">Live</span>
+        </button>
+      </div>
+      <div class="tools-buttons">
+        <button type="button" class="pill" id="tools-refresh-btn" onclick="loadLogs(false)" data-t="tools.refresh" hidden>Refresh</button>
+        <label class="tools-check"><input type="checkbox" id="tools-redact" checked onchange="setToolsRedact(this.checked)"><span data-t="tools.hidePrivate">Hide private details</span></label>
+        <button type="button" class="pill on" id="tools-autoscroll-btn" aria-pressed="true" onclick="toggleToolsAutoScroll()" data-t="tools.autoScroll">Auto-scroll</button>
+        <button type="button" class="pill" id="tools-copy-btn" onclick="copyToolsLogs()" data-t="tools.copy">Copy</button>
+        <button type="button" class="pill" id="tools-download-btn" onclick="downloadToolsLogs()" data-t="tools.download">Export</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tools-terminal" id="tools-terminal">
+    <div class="tools-term-header">
+      <div class="term-col term-col-time" data-t="tools.col.time">Time</div>
+      <div class="term-col term-col-src" data-t="tools.col.source">Source</div>
+      <div class="term-col term-col-lvl" data-t="tools.col.level">Level</div>
+      <div class="term-col term-col-proc" data-t="tools.col.process">Process</div>
+      <div class="term-col term-col-msg" data-t="tools.col.message">Message</div>
+      <div class="tools-search-count" id="tools-search-count"></div>
+    </div>
+    <div class="tools-term-body" id="tools-log-entries">
+      <div class="tools-term-empty" data-t="tools.loading">Loading system logs...</div>
+    </div>
+    <button type="button" class="tools-jump" id="tools-scroll-btn" onclick="scrollToolsToBottom()" hidden data-t="tools.jumpLatest">Jump to latest &darr;</button>
+  </div>
+</section>
+</main>
+
+<footer>
+  <span class="foot-end"><span id="activity-txrx" class="activity-txrx" aria-hidden="true"><span id="act-tx" class="txrx-pip"></span><span id="act-rx" class="txrx-pip"></span></span><a id="version" hidden target="_blank" rel="noopener noreferrer"></a><a id="version-new" hidden target="_blank" rel="noopener noreferrer"></a><button type="button" class="theme-toggle" id="theme-toggle">☾</button></span>
+</footer>
+
+<!-- Offered on load when "Update pop-up" is on in the Server tab; see offerUpdatePopup in ui/update.js. -->
+<div id="updpop" class="modal-backdrop" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="updpop-title">
+    <span class="updpop-st" data-t="server.popup.status">Update available</span>
+    <div class="updpop-t" id="updpop-title">&mdash;</div>
+    <p class="updpop-s" id="updpop-summary" hidden></p>
+    <p class="updpop-d" id="updpop-desc"></p>
+    <div class="updpop-v"><span data-t="server.popup.installed">Installed</span><b id="updpop-from">&mdash;</b><span aria-hidden="true">&rarr;</span><b id="updpop-to">&mdash;</b></div>
+    <div class="upd-prog" id="updpop-prog" hidden>
+      <div class="upd-step" id="updpop-step"></div>
+      <div class="track"><b id="updpop-bar"></b></div>
+    </div>
+    <div class="sub" id="updpop-msg" role="status" aria-live="polite"></div>
+    <div class="btns updpop-btns" id="updpop-btns">
+      <button type="button" id="updpop-dismiss" onclick="dismissUpdatePopup()" data-t="server.popup.dismiss">Dismiss</button>
+      <button type="button" class="on" id="updpop-install" onclick="installFromPopup()" data-t="server.popup.update">Update</button>
+    </div>
+  </div>
+</div>
+
+<script src="/assets/i18n.js"></script>
+<!-- The server puts these back inline as one script, in this order: see inlineUI in lib/routes.js. -->
+<script src="/assets/ui/core.js"></script>
+<script src="/assets/ui/theme.js"></script>
+<script src="/assets/ui/format.js"></script>
+<script src="/assets/ui/readouts.js"></script>
+<script src="/assets/ui/update.js"></script>
+<script src="/assets/ui/controls.js"></script>
+<script src="/assets/ui/privacy.js"></script>
+<script src="/assets/ui/lgsettings.js"></script>
+<script src="/assets/ui/game.js"></script>
+<script src="/assets/ui/system.js"></script>
+<script src="/assets/ui/history.js"></script>
+<script src="/assets/ui/ssh.js"></script>
+<script src="/assets/ui/screentime.js"></script>
+<script src="/assets/ui/apps.js"></script>
+<script src="/assets/ui/install.js"></script>
+<script src="/assets/ui/home.js"></script>
+<script src="/assets/ui/servicemenu.js"></script>
+<script src="/assets/ui/oled.js"></script>
+<script src="/assets/ui/screensavers.js"></script>
+<script src="/assets/ui/mqtt.js"></script>
+<script src="/assets/ui/tools.js"></script>
+<script src="/assets/ui/search-aliases.js"></script>
+<script src="/assets/ui/search.js"></script>
+<script src="/assets/ui/tabs.js"></script>
+<script src="/assets/ui/main.js"></script>
+</body>
+</html>

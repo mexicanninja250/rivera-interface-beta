@@ -1,0 +1,13 @@
+{
+  "glasshouse": {
+    "repository": "https://github.com/rorygallagher2024/glasshouse",
+    "commit": "a1b93a218222034934004d502aeff3f111dfd411",
+    "version": "0.118.0"
+  },
+  "lightkeeper": {
+    "repository": "https://github.com/chiotas/lightkeeper",
+    "commit": "116ea3d1bf540baa8dea091a3fe10cddacefb9fc",
+    "version": "1.0.1"
+  },
+  "testedHomeSourceSha256": "aca18c66e0e1fe9853f77ccdd813a63240bcf4a5b0aa09a9fd8199806a8d68ef"
+}

@@ -1,0 +1,263 @@
+{
+  "ok": true,
+  "updatedAt": "2026-10-23",
+  "attribution": "Show information: TVmaze (CC BY-SA)",
+  "source": "https://www.tvmaze.com/api",
+  "availability": "Public show information; regional availability may vary. Opens the service app.",
+  "shows": [
+    {
+      "id": 2993,
+      "appId": "netflix",
+      "title": "Stranger Things",
+      "description": "When a young boy vanishes, a small town uncovers a mystery involving secret experiments, terrifying supernatural forces and one strange little girl.",
+      "genres": [
+        "Drama",
+        "Horror",
+        "Science-Fiction"
+      ],
+      "year": "2016",
+      "provider": "Netflix",
+      "image": "/assets/tvos/shows/2993.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/2993/stranger-things",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/70/175852.jpg"
+    },
+    {
+      "id": 53647,
+      "appId": "netflix",
+      "title": "Wednesday",
+      "description": "Smart, sarcastic and a little dead inside, Wednesday Addams investigates a murder spree while making new friends \u2014 and foes \u2014 at Nevermore Academy.",
+      "genres": [
+        "Comedy",
+        "Mystery",
+        "Supernatural"
+      ],
+      "year": "2022",
+      "provider": "Netflix",
+      "image": "/assets/tvos/shows/53647.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/53647/wednesday",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/423/1059627.jpg"
+    },
+    {
+      "id": 46065,
+      "appId": "netflix",
+      "title": "One Piece",
+      "description": "With his straw hat and ragtag crew, young pirate Monkey D. Luffy goes on an epic voyage for treasure in this live-action adaptation of the popular manga.",
+      "genres": [
+        "Action",
+        "Adventure",
+        "Fantasy"
+      ],
+      "year": "2023",
+      "provider": "Netflix",
+      "image": "/assets/tvos/shows/46065.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/46065/one-piece",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/375/937644.jpg"
+    },
+    {
+      "id": 49041,
+      "appId": "amazon",
+      "title": "Fallout",
+      "description": "Based on one of the greatest video game series of all time, Fallout is the story of haves and have nots in a world in which there's almost nothing left to have. 200 years after the apocalypse, a peaceful denizen from a cozy fallout shelter is forced to return to the surface and is shocked to discover the wasteland waiting for her.",
+      "genres": [
+        "Drama",
+        "Action",
+        "Science-Fiction"
+      ],
+      "year": "2024",
+      "provider": "Prime Video",
+      "image": "/assets/tvos/shows/49041.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/49041/fallout",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/514/1285808.jpg"
+    },
+    {
+      "id": 43031,
+      "appId": "amazon",
+      "title": "Reacher",
+      "description": "Reacher\u00a0follows Jack Reacher, a veteran military police investigator who has just recently entered civilian life. Reacher is a drifter, carrying no phone and the barest of essentials as he travels the country and explores the nation he once served. When Reacher arrives in the small town of Margrave, Georgia, he finds a community grappling with its first homicide in 20 years. The cops immediately arrest him and eyewitnesses claim to place Reacher at the scene of the crime. While he works to prove his innocence, a deep-seated conspiracy begins to",
+      "genres": [
+        "Drama",
+        "Action",
+        "Thriller"
+      ],
+      "year": "2022",
+      "provider": "Prime Video",
+      "image": "/assets/tvos/shows/43031.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/43031/reacher",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/380/950091.jpg"
+    },
+    {
+      "id": 15299,
+      "appId": "amazon",
+      "title": "The Boys",
+      "description": "In a world where superheroes embrace the darker side of their massive celebrity and fame, The Boys centres on a group of vigilantes known informally as \"The Boys,\" who set out to take down corrupt superheroes with no more than blue collar grit and a willingness to fight dirty.",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Adult"
+      ],
+      "year": "2019",
+      "provider": "Prime Video",
+      "image": "/assets/tvos/shows/15299.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/15299/the-boys",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/206/515805.jpg"
+    },
+    {
+      "id": 38963,
+      "appId": "com.disney.disneyplus-prod",
+      "title": "The Mandalorian",
+      "description": "After the stories of Jango and Boba Fett, another warrior emerges in the Star Wars universe. The Mandalorian is set after the fall of the Empire and before the emergence of the First Order. We follow the travails of a lone gunfighter in the outer reaches of the galaxy far from the authority of the New Republic...",
+      "genres": [
+        "Action",
+        "Adventure",
+        "Science-Fiction"
+      ],
+      "year": "2019",
+      "provider": "Disney+",
+      "image": "/assets/tvos/shows/38963.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/38963/the-mandalorian",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/218/547389.jpg"
+    },
+    {
+      "id": 52341,
+      "appId": "com.disney.disneyplus-prod",
+      "title": "Andor",
+      "description": "Andor explores a new perspective from the\u202fStar Wars\u202fgalaxy, focusing on Cassian Andor's journey to discover the difference he can make. The series brings forward the tale of the burgeoning rebellion against the Empire and how people and planets became involved. It's an era filled with danger, deception and intrigue where Cassian will embark on the path that is destined to turn him into a rebel hero.",
+      "genres": [
+        "Science-Fiction",
+        "Thriller",
+        "Espionage"
+      ],
+      "year": "2022",
+      "provider": "Disney+",
+      "image": "/assets/tvos/shows/52341.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/52341/andor",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/412/1030743.jpg"
+    },
+    {
+      "id": 41007,
+      "appId": "com.disney.disneyplus-prod",
+      "title": "Loki",
+      "description": "Loki follows the trickster and shape-shifter god who pops up throughout human history as an unlikely influencer on historical events.",
+      "genres": [
+        "Action",
+        "Adventure",
+        "Science-Fiction"
+      ],
+      "year": "2021",
+      "provider": "Disney+",
+      "image": "/assets/tvos/shows/41007.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/41007/loki",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/317/794815.jpg"
+    },
+    {
+      "id": 44933,
+      "appId": "com.apple.appletv",
+      "title": "Severance",
+      "description": "Mark Scout leads a team at Lumon Industries, whose employees have undergone a severance procedure, which surgically divides their memories between their work and personal lives. This daring experiment in \"work-life balance\" is called into question as Mark finds himself at the center of an unraveling mystery that will force him to confront the true nature of his work\u2026 and of himself.",
+      "genres": [
+        "Drama",
+        "Science-Fiction",
+        "Mystery"
+      ],
+      "year": "2022",
+      "provider": "Apple TV",
+      "image": "/assets/tvos/shows/44933.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/44933/severance",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/384/960581.jpg"
+    },
+    {
+      "id": 38052,
+      "appId": "com.apple.appletv",
+      "title": "Silo",
+      "description": "Silo depicts a ruined and toxic future, when thousands of people live in a giant silo deep underground. After its sheriff breaks a cardinal rule and residents die mysteriously, engineer Juliette starts to uncover shocking secrets and the truth about the silo.",
+      "genres": [
+        "Drama",
+        "Science-Fiction",
+        "Mystery"
+      ],
+      "year": "2023",
+      "provider": "Apple TV",
+      "image": "/assets/tvos/shows/38052.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/38052/silo",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/459/1149869.jpg"
+    },
+    {
+      "id": 45039,
+      "appId": "com.apple.appletv",
+      "title": "Slow Horses",
+      "description": "Slow Horses follows the story of a group of British intelligence agents who serve in a dumping ground department of MI5 called Slough House after the big mistakes they've made that resulted in the end of their mainstream careers.This quick-witted spy drama follows a dysfunctional team of MI5 agents\u2014and their obnoxious boss, the notorious Jackson Lamb\u2014as they navigate the espionage world's smoke and mirrors to defend England from sinister forces.",
+      "genres": [
+        "Drama",
+        "Thriller",
+        "Espionage"
+      ],
+      "year": "2022",
+      "provider": "Apple TV",
+      "image": "/assets/tvos/shows/45039.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/45039/slow-horses",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/471/1178812.jpg"
+    },
+    {
+      "id": 48830,
+      "appId": "hulu",
+      "title": "Only Murders in the Building",
+      "description": "Only Murders in the Building follows three New Yorkers who find they have a mutual interest in solving true crime \u2013 but limit their amateur sleuthing to only murders in their building.",
+      "genres": [
+        "Comedy",
+        "Crime",
+        "Mystery"
+      ],
+      "year": "2021",
+      "provider": "Hulu",
+      "image": "/assets/tvos/shows/48830.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/48830/only-murders-in-the-building",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/331/829547.jpg"
+    },
+    {
+      "id": 37336,
+      "appId": "hulu",
+      "title": "Sh\u014dgun",
+      "description": "Sh\u014dgun is set in Japan in the year 1600 at the dawn of a century-defining civil war. Lord Yoshii Toranaga is fighting for his life as his enemies on the Council of Regents unite against him, when a mysterious European ship is found marooned in a nearby fishing village.",
+      "genres": [
+        "Drama",
+        "Adventure",
+        "History"
+      ],
+      "year": "2024",
+      "provider": "Hulu",
+      "image": "/assets/tvos/shows/37336.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/37336/shogun",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/505/1262957.jpg"
+    },
+    {
+      "id": 16579,
+      "appId": "hulu",
+      "title": "The Handmaid's Tale",
+      "description": "The Handmaid's Tale is the story of life in the dystopia of Gilead, a totalitarian society in what was formerly the United States. Facing environmental disasters and a plunging birthrate, Gilead is ruled by a twisted fundamentalism in its militarized \u2018return to traditional values'. As one of the few remaining fertile women, Offred is a Handmaid in the Commander's household, one of the caste of women forced into sexual servitude as a last desperate attempt to repopulate the world. In this terrifying society, Offred must navigate between Commande",
+      "genres": [
+        "Drama",
+        "Science-Fiction"
+      ],
+      "year": "2017",
+      "provider": "Hulu",
+      "image": "/assets/tvos/shows/16579.jpg",
+      "portrait": false,
+      "source": "https://www.tvmaze.com/shows/16579/the-handmaids-tale",
+      "imageSource": "https://static.tvmaze.com/uploads/images/original_untouched/219/547646.jpg"
+    }
+  ]
+}
